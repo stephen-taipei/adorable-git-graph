@@ -338,6 +338,63 @@ try {
     async () => (await text()).includes('parent → commit:') && (await text()).includes(sha('f1')),
     'commit context change',
   );
+  await wait(
+    () =>
+      ui(
+        (r, expected) => r.querySelector('.agg-commit[data-selected]')?.dataset.sha === expected,
+        sha('f1'),
+      ),
+    'URL commit initially selected',
+  );
+  await click(`.agg-commit[data-sha="${sha('m13')}"]`);
+  await wait(
+    () =>
+      ui(
+        (r, expected) => r.querySelector('.agg-commit[data-selected]')?.dataset.sha === expected,
+        sha('m13'),
+      ),
+    'manual selection differs from URL commit',
+  );
+  if (mode === 'local') await page.reload();
+  else {
+    await click('.agg-actions .agg-btn--danger');
+    await wait(() => ui((r) => Boolean(r.querySelector('.agg-fab'))), 'commit context closed');
+    await click('.agg-fab');
+  }
+  await wait(
+    () =>
+      ui(
+        (r, expected) => r.querySelector('.agg-commit[data-selected]')?.dataset.sha === expected,
+        sha('m13'),
+      ),
+    'same commit context restores manual selection',
+  );
+  assert.equal(await page.evaluate(() => location.href), commitUrl);
+  const nextCommitUrl = commitUrl.replace(sha('f1'), sha('f2'));
+  if (mode === 'local') await page.goto(nextCommitUrl);
+  else
+    await page.evaluate((url) => {
+      history.pushState({}, '', url);
+      document.dispatchEvent(new Event('turbo:load'));
+    }, nextCommitUrl);
+  await wait(
+    () =>
+      ui(
+        (r, expected) => r.querySelector('.agg-commit[data-selected]')?.dataset.sha === expected,
+        sha('f2'),
+      ),
+    'new commit context selects its URL commit',
+  );
+  if (
+    !(await ui(
+      (r) => r.querySelector('.agg-diag-toggle')?.getAttribute('aria-expanded') === 'true',
+    ))
+  )
+    await click('.agg-diag-toggle');
+  await wait(
+    async () => (await text()).includes('parent → commit:') && (await text()).includes(sha('f2')),
+    'new commit context diagnostics',
+  );
   await ui((r) =>
     r.querySelector('.agg-diag-section select')?.scrollIntoView({ block: 'nearest' }),
   );
@@ -389,6 +446,11 @@ try {
     focusBefore,
   );
   if (mode !== 'local') {
+    await wait(
+      async () => !(await text()).includes('Loading…') && !(await text()).includes('載入中…'),
+      'prior diagnostics settled before token change',
+    );
+    await wait(() => seen.pending === 0, 'prior mock requests drained');
     const before = seen.auth.length,
       beforeCalls = seen.paths.length;
     await setToken('');

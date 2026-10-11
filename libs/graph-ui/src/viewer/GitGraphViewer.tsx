@@ -141,19 +141,28 @@ export function GitGraphViewer({
   const layout = state.kind === 'ready' ? state.layout : null;
   const hasRows = Boolean(layout && layout.nodes.length > 0);
 
-  const contextKey = `${sourceKey ?? ''}|${diagnostics?.context?.commit ?? ''}|${diagnostics?.context?.pullRequest ?? ''}`;
-  const lastContextKey = useRef('');
-  useEffect(() => {
+  const contextKey = JSON.stringify([
+    sourceKey ?? '',
+    diagnostics?.context?.commit ?? null,
+    diagnostics?.context?.pullRequest ?? null,
+  ]);
+  const hasContext = Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest);
+  const lastContextKey = useRef(contextKey);
+  const contextNavigated = useRef(false);
+  useLayoutEffect(() => {
     if (!layout || lastContextKey.current === contextKey) return;
     lastContextKey.current = contextKey;
-    if (diagnostics?.context?.commit || diagnostics?.context?.pullRequest) {
+    if (hasContext) {
+      contextNavigated.current = true;
+      const commit = diagnostics?.context?.commit;
       setSelectedSha(
-        diagnostics.context.commit
-          ? (layout.nodes.find((n) => n.sha.startsWith(diagnostics.context!.commit!))?.sha ?? null)
-          : null,
+        commit ? (layout.nodes.find((n) => n.sha.startsWith(commit))?.sha ?? null) : null,
       );
+      setFocusBranch(null);
+      setQuery('');
+      setCursor(-1);
     }
-  }, [contextKey, layout, diagnostics]);
+  }, [contextKey, layout, diagnostics, hasContext]);
 
   // ── 由 layout 衍生的資料（統計、可到達性、搜尋） ──────────────────────────
   const derived = useMemo(() => {
@@ -253,7 +262,8 @@ export function GitGraphViewer({
       // 換了 repo / 來源：從頭看
       lastRepo.current = repo;
       let saved: {
-        selected?: string;
+        selected?: string | null;
+        contextKey?: string;
         branch?: string;
         query?: string;
         anchor?: string;
@@ -264,16 +274,22 @@ export function GitGraphViewer({
       } catch {
         /* storage is optional */
       }
+      const sameContext =
+        !contextNavigated.current &&
+        (saved.contextKey === contextKey || (!hasContext && saved.contextKey === undefined));
+      if (!sameContext) saved = {};
       const restored = saved.anchor ? layout.nodes.find((n) => n.sha === saved.anchor) : undefined;
       sc.scrollTop = restored ? Math.max(0, topPad + (restored.row + (saved.frac ?? 0)) * rowH) : 0;
       anchor.current = { frac: 0 };
       const context = diagnostics?.context?.commit;
       setSelectedSha(
-        context
-          ? (layout.nodes.find((n) => n.sha.startsWith(context))?.sha ?? null)
+        sameContext && saved.selected === null
+          ? null
           : saved.selected && layout.nodes.some((n) => n.sha === saved.selected)
             ? saved.selected
-            : null,
+            : context
+              ? (layout.nodes.find((n) => n.sha.startsWith(context))?.sha ?? null)
+              : null,
       );
       setFocusBranch(
         saved.branch && layout.branches.some((b) => b.name === saved.branch) ? saved.branch : null,
@@ -296,9 +312,10 @@ export function GitGraphViewer({
             });
       if (Math.abs(next - sc.scrollTop) > 0.5) sc.scrollTop = next;
     }
+    contextNavigated.current = false;
     metricsRef.current = metrics;
     rememberAnchor();
-  }, [layout, metrics, sourceKey, rememberAnchor]);
+  }, [layout, metrics, sourceKey, rememberAnchor, contextKey, hasContext]);
 
   useEffect(() => {
     if (!layout) return;
@@ -306,6 +323,7 @@ export function GitGraphViewer({
       sessionStorage.setItem(
         `agg:focus:${identity}`,
         JSON.stringify({
+          contextKey,
           selected: selectedSha,
           branch: focusBranch,
           query,
@@ -316,7 +334,7 @@ export function GitGraphViewer({
     } catch {
       /* optional preference storage */
     }
-  }, [identity, layout, selectedSha, focusBranch, query]);
+  }, [identity, contextKey, layout, selectedSha, focusBranch, query]);
 
   // 內容區與捲軸寬度（欄位標題要和列對齊）
   useLayoutEffect(() => {

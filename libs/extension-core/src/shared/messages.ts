@@ -5,7 +5,14 @@ export type BgRequest =
   | { type: 'open-options' }
   | { type: 'rate-limit' }
   | { type: 'clear-cache' }
-  | { type: 'diagnostic'; owner: string; repo: string; requestId: string; query: DiagnosticRequest }
+  | {
+      type: 'diagnostic';
+      owner: string;
+      repo: string;
+      requestId: string;
+      generation: string;
+      query: DiagnosticRequest;
+    }
   | { type: 'diagnostic-cancel'; requestId: string };
 
 export interface BgError {
@@ -16,7 +23,12 @@ export interface BgError {
 
 export type BgResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: BgError };
 
-export type FetchGraphResponse = BgResponse<{ graph: GraphData; fromCache: boolean }>;
+export type FetchGraphResponse = BgResponse<{
+  graph: GraphData;
+  fromCache: boolean;
+  /** Opaque background lifetime/auth scope; never a token or its hash. */
+  diagnosticGeneration: string;
+}>;
 export type RateLimitResponse = BgResponse<{
   limit: number;
   remaining: number;

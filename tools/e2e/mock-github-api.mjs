@@ -68,7 +68,7 @@ const apiCommit = (c, base) => ({
   author: { login: c.author, avatar_url: `${base}/avatar/${c.author}.svg` },
 });
 
-export const seen = { auth: [], paths: [] };
+export const seen = { auth: [], paths: [], pending: 0 };
 /**
  * 每個 API 回應前多等幾毫秒（預設 0）。快到 React 把「開始重新整理」和「完成」合併成同一次 render 時，
  * 轉圈根本不會出現；要驗證轉圈的步驟把這個調高，結束後記得歸零。
@@ -78,6 +78,20 @@ export const latency = { ms: 0 };
 export function startMock() {
   return new Promise((ok) => {
     const server = createServer((req, res) => {
+      // Record arrival, not delayed response time: cancelled old requests may finish later.
+      const url = new URL(req.url, 'http://x');
+      seen.paths.push(url.pathname + url.search);
+      if (req.headers.authorization) seen.auth.push(req.headers.authorization);
+      seen.pending++;
+      let settled = false;
+      const settle = () => {
+        if (!settled) {
+          settled = true;
+          seen.pending--;
+        }
+      };
+      res.once('finish', settle);
+      res.once('close', settle);
       if (latency.ms > 0 && !req.url.startsWith('/avatar/')) {
         setTimeout(() => handle(req, res), latency.ms);
         return;
@@ -87,8 +101,6 @@ export function startMock() {
     function handle(req, res) {
       const url = new URL(req.url, 'http://x');
       const base = `http://127.0.0.1:${server.address().port}`;
-      seen.paths.push(url.pathname + url.search);
-      if (req.headers.authorization) seen.auth.push(req.headers.authorization);
       // 與 api.github.com 一致的 CORS：網頁（非 extension）呼叫時需要，且必須 expose rate limit 標頭
       const cors = {
         'access-control-allow-origin': '*',

@@ -20,7 +20,7 @@ pnpm start --repo /absolute/path/to/repo
 
 分支檔案語意固定為 `merge-base → head`。它與 `base tree → head tree` 不同。Merge commit 預設 first parent，可切換到來源實際回傳的其他 parent。Root commit 先確認不是 shallow 邊界，再與 empty tree 比較。沒有共同祖先或有多個 merge base 時，本機可以保留已核對的分歧計數，但不選擇檔案比較基準。
 
-「關閉動畫」會記住偏好，並尊重系統 reduced-motion。每個 repo 的基本選取、branch 焦點與搜尋會以 sessionStorage 保存；不保存本機路徑、檔案內容或 token。
+「關閉動畫」會記住偏好，並尊重系統 reduced-motion。每個 repo 的基本選取、branch 焦點與搜尋會以 sessionStorage 保存，並記錄所在 commit／PR context。相同 commit 頁重開會還原手動選取；導覽到另一個 commit 時，會選取新的 URL context。不保存本機路徑、檔案內容或 token。
 
 ## Chrome／Firefox 同步更新
 
@@ -36,7 +36,7 @@ pnpm --filter @adorable/extension-firefox lint
 
 在 GitHub commit／PR 頁面開啟 extension 時，診斷會使用目前頁面的 commit 或 PR 編號。同 repo 的 SPA 導覽也會更新 context。PR 首版只顯示編號、title、state、draft、base/head repo/ref/SHA、取得時間與連結；按「使用 PR base/head」才設定比較欄位，保留 fork 身分。
 
-Extension 的 token 留在 background。Content script 只送查詢並取得結果。更換 token／設定會取消診斷、清除舊 graph 快取並通知 content 重建 adapter。
+Extension 的 token 留在 background。Content script 只送查詢並取得結果；每次診斷都綁定取得 graph 時的非秘密認證代次。更換 token／設定會立即取消診斷、清除 background 的診斷記憶體快取並通知 content，通知不等待 graph 磁碟快取刪除。Background 序列化讀取目前設定，不採納延遲事件中的舊設定；舊 adapter 的請求會被拒絕。Background 重啟後會要求 content 重抓 graph，重新取得代次。
 
 ## 完整性與限制
 
@@ -52,7 +52,7 @@ GitHub compare API 的檔案只在第一頁，commit 分頁與 files 上限分�
 
 Binary、rename、缺 patch 與截斷分開呈現。Ancestry 不證明 patch 等價、修改現在仍有效或已部署；squash、cherry-pick、revert 不由圖形判定。Remote-tracking refs 是本機觀察值，未查詢 remote 最新狀態。
 
-本機 query 只接受 loopback 同源 JSON，repo 使用 server 產生的不透明 id。所有 ref 先解析為 SHA，pathspec 為 literal，停用 external diff、textconv、fsmonitor、signature helper、lazy fetch；子行程有取消與時間／輸出上限。變更與 patch 只有 adapter 生命週期內的有界記憶體快取。來源／token 更新會換 adapter，不將檔案內容寫入 browser storage。
+本機 query 只接受 loopback 同源 JSON，repo 使用 server 產生的不透明 id。所有 ref 先解析為 SHA，pathspec 為 literal，停用 external diff、textconv、fsmonitor、signature helper、lazy fetch；子行程有取消與時間／輸出上限。變更與 patch 使用有界記憶體快取；extension 的快取只留在 background，依認證代次與 repo 隔離，每個請求仍需通過代次檢查。來源／token 更新不沿用舊快取，不將檔案內容寫入 browser storage。
 
 靜態建置只含既有 subject-only graph 快照，不加入檔案內容，也沒有本機診斷 endpoint。舊快照或無 adapter 的來源明確降級。這一版沒有 Git 寫入操作、AI 解說、reviews/checks 聚合、worktree 狀態或商店發布。
 
