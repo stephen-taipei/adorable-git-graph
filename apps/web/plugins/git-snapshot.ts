@@ -1035,6 +1035,14 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
     async configureServer(server) {
       // vitest 只是借用 Vite 的轉換管線，不需要讀 git 也不需要監看
       if (process.env['VITEST']) return;
+      // The virtual module also contains local history. Guard every HTTP entry
+      // before Vite transforms or serves cached module bytes, including aliases
+      // and query variants of virtual:git-snapshot.
+      server.middlewares.use((req, res, next) => {
+        if (!isAllowedHost(req, allowedHosts) || !isSameOrigin(req, true))
+          return sendJson(res, 403, { error: 'forbidden' });
+        next();
+      });
       await serveLocalRepos(server);
     },
   };

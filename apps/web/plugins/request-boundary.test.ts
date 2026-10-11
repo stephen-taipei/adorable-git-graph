@@ -33,7 +33,7 @@ describe('local endpoint request boundary on a real Vite server', () => {
         git('config', 'commit.gpgSign', 'false');
         writeFileSync(join(dir, 'fixture.txt'), 'boundary fixture\n');
         git('add', '.');
-        git('commit', '-q', '-m', 'fixture');
+        git('commit', '-q', '-m', 'boundary fixture commit');
         delete process.env['VITEST'];
         server = await createServer({
           configFile: false,
@@ -49,6 +49,7 @@ describe('local endpoint request boundary on a real Vite server', () => {
         await server.listen();
         process.env['VITEST'] = flag;
         const port = (server.httpServer!.address() as AddressInfo).port;
+        let responseBody = '';
         const send = (path: string, host: string, origin?: string) =>
           new Promise<number>((resolve, reject) => {
             const diagnostic = path.endsWith('/diagnostics');
@@ -66,8 +67,13 @@ describe('local endpoint request boundary on a real Vite server', () => {
                 },
               },
               (res) => {
-                res.resume();
-                res.on('end', () => resolve(res.statusCode!));
+                let body = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk: string) => (body += chunk));
+                res.on('end', () => {
+                  responseBody = body;
+                  resolve(res.statusCode!);
+                });
               },
             );
             req.on('error', reject);
@@ -77,15 +83,29 @@ describe('local endpoint request boundary on a real Vite server', () => {
                 : undefined,
             );
           });
-        for (const path of ['/__agg/diagnostics', '/__agg/git-snapshot', '/__agg/repos']) {
+        for (const path of [
+          '/__agg/diagnostics',
+          '/__agg/git-snapshot',
+          '/__agg/repos',
+          '/@id/__x00__virtual:git-snapshot',
+          '/@id/__x00__virtual:git-snapshot?import',
+          '/@id/__x00__virtual:git-snapshot?t=1791729000000',
+        ]) {
+          // Warm the actual module cache before checking rejected requests.
+          expect(await send(path, `localhost:${port}`, `http://localhost:${port}`), path).toBe(200);
+          if (path.startsWith('/@id/')) expect(responseBody).toContain('boundary fixture commit');
           expect(
             await send(path, `untrusted.example:${port}`, `http://untrusted.example:${port}`),
           ).toBe(403);
+          expect(responseBody).not.toContain('boundary fixture commit');
           expect(await send(path, `localhost:${port}`, `https://localhost:${port}`)).toBe(403);
           expect(await send(path, `localhost:${port}`, `http://localhost:${port + 1}`)).toBe(403);
           expect(await send(path, `localhost:${port}`, `http://localhost:${port}`)).toBe(200);
           expect(await send(path, `127.0.0.1:${port}`, `http://127.0.0.1:${port}`)).toBe(200);
           expect(await send(path, `[::1]:${port}`, `http://[::1]:${port}`)).toBe(200);
+          expect(await send(path, `192.168.50.20:${port}`, `http://192.168.50.20:${port}`)).toBe(
+            200,
+          );
           if (allowedHosts !== true) {
             expect(await send(path, `rd.example:${port}`, `http://rd.example:${port}`)).toBe(200);
             expect(
