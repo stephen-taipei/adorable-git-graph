@@ -4,10 +4,12 @@ import { t } from './i18n';
 
 export function TokenDialog({
   token,
+  error,
   onSave,
   onClose,
 }: {
   token: string;
+  error?: string | null;
   onSave: (token: string) => void;
   onClose: () => void;
 }) {
@@ -57,6 +59,11 @@ export function TokenDialog({
         />
         <p>{t.tokenHelp}</p>
         <p className="web-warn">{t.tokenWarn}</p>
+        {error && (
+          <p className="web-warn" role="alert">
+            {error}
+          </p>
+        )}
         <div className="web-row">
           <button type="submit" className="web-cta">
             {t.save}

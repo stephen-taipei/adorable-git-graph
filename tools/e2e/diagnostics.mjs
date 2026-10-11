@@ -23,6 +23,18 @@ const { chromium } = require('playwright-core');
 const mode = process.argv[2] ?? 'local';
 assert(['local', 'chrome', 'firefox'].includes(mode));
 const owned = mkdtempSync(resolve(tmpdir(), 'agg-diagnostic-e2e-'));
+console.log(
+  JSON.stringify({
+    owner: 'isolated diagnostic E2E',
+    mode,
+    pid: process.pid,
+    ppid: process.ppid,
+    startedAt: new Date().toISOString(),
+    cwd: root,
+    command: process.argv,
+    temporaryDirectory: owned,
+  }),
+);
 const artifacts = resolve(
   root,
   `apps/${mode === 'local' ? 'web' : mode === 'chrome' ? 'extension' : 'extension-firefox'}/e2e/.artifacts/diagnostics`,
@@ -118,12 +130,443 @@ const input = async (side, value) =>
     },
     { side, value },
   );
+
+// Mount the shipped App, SourceBar and TokenDialog unchanged. The Profiler
+// records committed DOM, including frames before passive effects can run.
+const appScopeFiles = ['app-scope.html', 'app-scope.mjs'].map((p) => resolve(artifacts, p));
+function prepareAppScope() {
+  writeFileSync(
+    appScopeFiles[0],
+    '<!doctype html><html><body><div id="root"></div><script type="module" src="./app-scope.mjs"></script></body></html>',
+  );
+  writeFileSync(
+    appScopeFiles[1],
+    `
+import React,{StrictMode,Profiler} from 'react';
+import {createRoot} from 'react-dom/client';
+import {App} from '/src/App.tsx';
+import '@adorable/graph-ui/viewer.css';
+import '/src/styles.css';
+const host=document.getElementById('root');
+window.__aggAppFrames=[];
+createRoot(host).render(React.createElement(StrictMode,null,React.createElement(Profiler,{id:'shipped-app',onRender(){
+ const p=new URLSearchParams(location.search);
+ window.__aggAppFrames.push({repo:p.get('repo'),context:p.get('commit'),title:host.querySelector('.agg-title-text')?.textContent,
+  ready:!!host.querySelector('.agg-commit'),selected:host.querySelector('.agg-commit[data-selected="true"]')?.dataset.sha??null,
+  files:[...host.querySelectorAll('.agg-diag-files button')].map(x=>x.textContent),
+  patch:host.querySelector('.agg-diag-patch pre')?.textContent??null});
+}},React.createElement(App))));
+`,
+  );
+}
+async function verifyAppScope(api) {
+  const nonceKey = 'agg:viewer-auth-nonce:v1',
+    selected = '1'.repeat(40),
+    context = '2'.repeat(40);
+  const tokenA = 'fixture-app-auth-a',
+    tokenB = 'fixture-app-auth-b';
+  const calls = [],
+    results = [];
+  const routePattern = api + '/repos/app-*/fixture**';
+  await ctx.route(routePattern, async (route) => {
+    const req = route.request(),
+      url = new URL(req.url()),
+      parts = url.pathname.split('/'),
+      owner = parts[2];
+    const auth = req.headers().authorization;
+    const scope =
+      auth === `Bearer ${tokenA}` ? 'a' : auth === `Bearer ${tokenB}` ? 'b' : 'anonymous';
+    const commit = (sha) => ({
+      sha,
+      parents: sha === selected ? [{ sha: context }] : [],
+      commit: {
+        message: 'App scope ' + owner,
+        author: { name: 'Fixture', date: '2026-01-01T00:00:00Z' },
+      },
+      author: { login: 'fixture' },
+    });
+    let body;
+    if (/\/commits\/[a-f0-9]{40}$/.test(url.pathname)) {
+      calls.push({ owner, scope, requested: parts.at(-1) });
+      body = {
+        ...commit(parts.at(-1)),
+        files: [
+          {
+            filename: owner + '.txt',
+            status: 'modified',
+            additions: 1,
+            deletions: 0,
+            changes: 1,
+            patch: '@@ -0,0 +1 @@\n+' + owner + ':' + scope,
+          },
+        ],
+      };
+    } else if (url.pathname.endsWith('/commits')) body = [commit(selected), commit(context)];
+    else if (url.pathname.endsWith('/branches'))
+      body = [{ name: 'main', commit: { sha: selected } }];
+    else if (url.pathname.endsWith('/tags') || url.pathname.endsWith('/pulls')) body = [];
+    else
+      body = {
+        name: 'fixture',
+        default_branch: 'main',
+        html_url: 'https://github.com/' + owner + '/fixture',
+      };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+  });
+  await page.addInitScript(
+    ({ nonceKey }) => {
+      const get = Storage.prototype.getItem,
+        set = Storage.prototype.setItem,
+        remove = Storage.prototype.removeItem;
+      const tokenKey = 'agg.github-token';
+      const initial = (k) => get.call(sessionStorage, 'agg:test:' + k) === '1';
+      window.__aggStorageFault = {
+        tokenGet: initial('tokenGet'),
+        nonceGet: initial('nonceGet'),
+        nonceSet: initial('nonceSet'),
+      };
+      window.__aggStorageInspect = {
+        token: () => get.call(localStorage, tokenKey),
+        nonce: () => get.call(sessionStorage, nonceKey),
+      };
+      Storage.prototype.getItem = function (k) {
+        const f = window.__aggStorageFault;
+        if (
+          this === localStorage &&
+          k === tokenKey &&
+          (f.tokenGet || (f.tokenReadAfterWrite && f.tokenWritten))
+        )
+          throw new Error('fixture token read blocked');
+        if (
+          this === sessionStorage &&
+          k === nonceKey &&
+          (f.nonceGet || (f.nonceReadAfterWrite && f.nonceWritten))
+        )
+          throw new Error('fixture nonce read blocked');
+        return get.call(this, k);
+      };
+      Storage.prototype.setItem = function (k, v) {
+        const f = window.__aggStorageFault;
+        if (this === localStorage && k === tokenKey && f.tokenSet)
+          throw new Error('fixture token write blocked');
+        if (this === sessionStorage && k === nonceKey && f.nonceSet)
+          throw new Error('fixture nonce write blocked');
+        set.call(this, k, v);
+        if (this === localStorage && k === tokenKey) f.tokenWritten = true;
+        if (this === sessionStorage && k === nonceKey) f.nonceWritten = true;
+      };
+      Storage.prototype.removeItem = function (k) {
+        const f = window.__aggStorageFault;
+        if (this === localStorage && k === tokenKey && f.tokenRemove)
+          throw new Error('fixture token removal blocked');
+        remove.call(this, k);
+        if (this === localStorage && k === tokenKey) f.tokenWritten = true;
+      };
+    },
+    { nonceKey },
+  );
+  const ready = (owner) =>
+    wait(
+      () =>
+        page.evaluate(
+          (owner) =>
+            document.querySelector('.agg-title-text')?.textContent === owner + '/fixture' &&
+            document.querySelectorAll('.agg-commit').length === 2,
+          owner,
+        ),
+      'actual App ready ' + owner,
+    );
+  const go = async (owner, commit) => {
+    await page
+      .locator('.web-form input')
+      .fill(commit ? `https://github.com/${owner}/fixture/commit/${commit}` : `${owner}/fixture`);
+    await page.locator('.web-form button[type="submit"]').click();
+    await ready(owner);
+  };
+  const select = async () => {
+    await page.locator(`.agg-commit[data-sha="${selected}"]`).click();
+    if ((await page.locator('.agg-diag-toggle').getAttribute('aria-expanded')) !== 'true')
+      await page.locator('.agg-diag-toggle').click();
+    await wait(
+      () => page.evaluate(() => !!document.querySelector('.agg-diag-files button')),
+      'actual App selected changes',
+    );
+  };
+  const openSettings = () => page.locator('.agg-actions button').last().click();
+  const save = async (value) => {
+    if (!(await page.locator('.web-dialog').count())) await openSettings();
+    await page.locator('.web-dialog input').fill(value);
+    await page.locator('.web-dialog button[type="submit"]').click();
+  };
+  const clear = async () => {
+    if (!(await page.locator('.web-dialog').count())) await openSettings();
+    await page.locator('.web-dialog button[type="button"]').first().click();
+  };
+  const closed = () =>
+    wait(
+      () =>
+        page
+          .locator('.web-dialog')
+          .count()
+          .then((n) => n === 0),
+      'actual TokenDialog saved',
+    );
+  const fault = (v) =>
+    page.evaluate((v) => {
+      window.__aggStorageFault = v;
+    }, v);
+  const inspect = () =>
+    page.evaluate(() => ({
+      token: window.__aggStorageInspect.token(),
+      nonce: window.__aggStorageInspect.nonce(),
+    }));
+  const resetFrames = () =>
+    page.evaluate(() => {
+      window.__aggAppFrames.length = 0;
+    });
+  const noOldFocus = async (label, from) => {
+    await ready('app-a');
+    await sleep(120);
+    const frames = await page.evaluate(() =>
+      window.__aggAppFrames.filter((f) => f.repo === 'app-a/fixture' && f.ready),
+    );
+    assert(frames.length > 0, label + ': ready frames observed');
+    assert(
+      frames.every((f) => f.selected === null && f.files.length === 0 && !f.patch),
+      label + ': no old selection/results in any committed frame',
+    );
+    assert(
+      !calls.slice(from).some((c) => c.owner === 'app-a' && c.requested === selected),
+      label + ': old SHA never reaches the new adapter',
+    );
+    results.push({ label, readyFrames: frames.length, oldSelectionRequests: 0 });
+  };
+  const visibleError = () =>
+    wait(
+      () =>
+        page
+          .locator('.web-dialog [role="alert"]')
+          .count()
+          .then((n) => n === 1),
+      'visible storage failure',
+    );
+  try {
+    await page.evaluate((token) => localStorage.setItem('agg.github-token', token), tokenA);
+    await page.goto(
+      'http://localhost:4277/e2e/.artifacts/diagnostics/app-scope.html?repo=app-a/fixture',
+    );
+    await ready('app-a');
+    await select();
+    const first = await inspect();
+    await page.reload();
+    await ready('app-a');
+    await wait(
+      () =>
+        page
+          .locator(`.agg-commit[data-selected="true"][data-sha="${selected}"]`)
+          .count()
+          .then((n) => n === 1),
+      'same auth same URL manual focus restored',
+    );
+    assert.equal((await inspect()).nonce, first.nonce);
+    results.push({ label: 'same-auth same-URL reload restores manual focus', passed: true });
+    await go('app-b');
+    await save(tokenB);
+    await closed();
+    await resetFrames();
+    let from = calls.length;
+    await go('app-a');
+    await noOldFocus('A→B→change token→A', from);
+    await page.reload();
+    await noOldFocus('changed token same-tab reload', from);
+    const focus = await page.evaluate(() =>
+      Object.entries(sessionStorage)
+        .filter(([k]) => k.startsWith('agg:focus:') && k.includes('app-a/fixture'))
+        .map(([, v]) => JSON.parse(v)),
+    );
+    assert(
+      focus.length > 0 &&
+        focus.every(
+          (f) =>
+            typeof f.viewerStateKey === 'string' &&
+            f.viewerStateKey.length > 0 &&
+            !f.viewerStateKey.includes('fixture-app-auth'),
+        ),
+      'nonsecret nonempty actual App viewer key',
+    );
+    await select();
+    await go('app-b');
+    await clear();
+    await closed();
+    await resetFrames();
+    from = calls.length;
+    await go('app-a');
+    await noOldFocus('A→B→clear token→A', from);
+    await page.reload();
+    await noOldFocus('cleared token same-tab reload', from);
+    await select();
+    await resetFrames();
+    from = calls.length;
+    await go('app-a', context);
+    await wait(
+      () =>
+        page
+          .locator(`.agg-commit[data-selected="true"][data-sha="${context}"]`)
+          .count()
+          .then((n) => n === 1),
+      'URL context takes priority',
+    );
+    const contextFrames = await page.evaluate(() =>
+      window.__aggAppFrames.filter((f) => f.context === '2'.repeat(40) && f.ready),
+    );
+    assert(
+      contextFrames.every((f) => f.selected !== '1'.repeat(40)),
+      'new URL never resurrects old selected SHA',
+    );
+    assert(
+      !calls.slice(from).some((c) => c.requested === selected),
+      'new URL does not request stale manual SHA',
+    );
+    results.push({ label: 'new commit URL wins over saved manual selection', passed: true });
+
+    // Failure at nonce set, nonce readback, token set and token readback.
+    for (const scenario of [
+      { label: 'nonce write failure', fault: { nonceSet: true }, partialToken: false },
+      {
+        label: 'nonce readback failure',
+        fault: { nonceReadAfterWrite: true },
+        partialToken: false,
+      },
+      { label: 'token write failure', fault: { tokenSet: true }, partialToken: false },
+      {
+        label: 'token readback after successful write',
+        fault: { tokenReadAfterWrite: true },
+        partialToken: true,
+      },
+    ]) {
+      await fault({});
+      if (await page.locator('.web-dialog').count())
+        await page.locator('.web-dialog button[type="button"]').last().click();
+      await go('app-a');
+      await save(tokenA);
+      await closed();
+      await ready('app-a');
+      await select();
+      await go('app-b');
+      await fault(scenario.fault);
+      await save(tokenB);
+      await visibleError();
+      const stored = await inspect();
+      assert.equal(
+        stored.token,
+        scenario.partialToken ? tokenB : tokenA,
+        scenario.label + ': persistence outcome reconciled',
+      );
+      await fault({});
+      await page.locator('.web-dialog button[type="button"]').last().click();
+      await resetFrames();
+      from = calls.length;
+      await go('app-a');
+      await noOldFocus(scenario.label + ' same-page', from);
+      await page.reload();
+      await noOldFocus(scenario.label + ' reload', from);
+    }
+    // Initial TOKEN read failure must not make Clear a same-empty-token no-op.
+    await save(tokenB);
+    await closed();
+    await ready('app-a');
+    await select();
+    await page.evaluate(() => sessionStorage.setItem('agg:test:tokenGet', '1'));
+    await page.reload();
+    await ready('app-a');
+    await clear();
+    await visibleError();
+    assert.equal(
+      (await inspect()).token,
+      tokenB,
+      'failed initial read never pretends credential was cleared',
+    );
+    await fault({});
+    await clear();
+    await closed();
+    assert.equal((await inspect()).token, null, 'retry Clear really removes persistent credential');
+    await page.evaluate(() => sessionStorage.removeItem('agg:test:tokenGet'));
+    await resetFrames();
+    from = calls.length;
+    await go('app-b');
+    await go('app-a');
+    await noOldFocus('initial token read failure then verified Clear', from);
+    for (const kind of ['nonceGet', 'nonceSet']) {
+      await save(tokenA);
+      await closed();
+      await ready('app-a');
+      await select();
+      await page.evaluate(
+        ({ kind, nonceKey }) => {
+          sessionStorage.setItem('agg:test:' + kind, '1');
+          if (kind === 'nonceSet') sessionStorage.removeItem(nonceKey);
+        },
+        { kind, nonceKey },
+      );
+      from = calls.length;
+      await page.reload();
+      await noOldFocus('initial ' + kind + ' failure', from);
+      await fault({});
+      await page.evaluate((kind) => sessionStorage.removeItem('agg:test:' + kind), kind);
+    }
+    await page.screenshot({ path: resolve(artifacts, 'actual-app-auth-scope.png') });
+    writeFileSync(
+      resolve(artifacts, 'actual-app-auth-scope-results.json'),
+      JSON.stringify(
+        { results, calls, syntheticCredentials: true, realApp: true, firstCommittedFrames: true },
+        null,
+        2,
+      ) + '\n',
+    );
+    console.log(
+      'PASS actual App auth scope: same-URL restore, token change/clear, reload, URL priority, verified storage failures and initial read failures',
+    );
+  } catch (error) {
+    const frames = await page.evaluate(() => window.__aggAppFrames).catch(() => []);
+    writeFileSync(
+      resolve(artifacts, 'actual-app-auth-scope-failure.json'),
+      JSON.stringify(
+        {
+          results,
+          calls,
+          frames,
+          error: String(error.message),
+          syntheticCredentials: true,
+          realApp: true,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    throw error;
+  } finally {
+    await fault({}).catch(() => {});
+    await page
+      .evaluate((token) => {
+        for (const k of ['tokenGet', 'nonceGet', 'nonceSet'])
+          sessionStorage.removeItem('agg:test:' + k);
+        localStorage.setItem('agg.github-token', token);
+      }, token)
+      .catch(() => {});
+    await ctx.unroute(routePattern);
+  }
+}
 try {
   server = await startMock();
   const api = `http://127.0.0.1:${server.address().port}`;
   if (mode === 'local') {
     prepareWebSourceIdentity(root);
     prepareViewerScope(root);
+    prepareAppScope();
     const head = fixture();
     child = spawn(
       process.execPath,
@@ -185,6 +628,7 @@ try {
     assert.equal(forbidden.status, 403);
     await verifyWebSourceIdentity({ page, ctx, api, root });
     await verifyViewerScope(page);
+    await verifyAppScope(api);
     await page.goto(`http://localhost:4277/?repo=demo/adorable-git-graph&pull=7`);
   } else {
     const extension = resolve(owned, 'extension');
@@ -340,6 +784,23 @@ try {
         .slice(from)
         .some((p) => p.includes(`/repos/demo/adorable-git-graph/commits/${OUTSIDE_SHA}`)),
       'restored outside inspection keeps the fork owner',
+    );
+  } else {
+    await page.reload();
+    await wait(
+      () =>
+        ui(
+          (r, expected) =>
+            [...r.querySelectorAll('.agg-diag-section')].some(
+              (s) => s.querySelector('select') && s.textContent.includes(expected),
+            ),
+          OUTSIDE_SHA,
+        ),
+      'actual App outside fork inspection restored on same-tab reload',
+    );
+    assert(
+      seen.paths.some((p) => p.includes(`/repos/fork/adorable-git-graph/commits/${OUTSIDE_SHA}`)),
+      'actual App restored inspection uses the fork repository',
     );
   }
   await ui((r) => r.querySelector('.agg-root').focus());
@@ -555,5 +1016,6 @@ try {
     await new Promise((r) => server.close(r));
   }
   if (mode === 'local') cleanupWebSourceIdentity(root);
+  if (mode === 'local') for (const p of appScopeFiles) rmSync(p, { force: true });
   rmSync(owned, { recursive: true, force: true });
 }
