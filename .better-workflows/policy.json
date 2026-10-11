@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "completion": { "require": ["test", "typecheck"] },
+  "evidence": {
+    "kinds": [
+      {
+        "kind": "test",
+        "exact": true,
+        "argv": [
+          ["pnpm", "test"],
+          ["pnpm", "run", "test"],
+          ["pnpm", "nx", "run-many", "-t", "test"],
+          ["pnpm", "exec", "nx", "run-many", "-t", "test"],
+          ["nx", "run-many", "-t", "test"]
+        ]
+      },
+      {
+        "kind": "typecheck",
+        "exact": true,
+        "argv": [
+          ["pnpm", "typecheck"],
+          ["pnpm", "run", "typecheck"],
+          ["pnpm", "nx", "run-many", "-t", "typecheck"],
+          ["pnpm", "exec", "nx", "run-many", "-t", "typecheck"],
+          ["nx", "run-many", "-t", "typecheck"]
+        ]
+      }
+    ]
+  },
+  "actions": {
+    "default": "ask",
+    "rules": {
+      "git-push": "allow",
+      "gh-pr-create": "allow",
+      "gh-pr-merge": "ask",
+      "gh-release": "ask",
+      "package-publish": "deny",
+      "addon-sign": "ask"
+    },
+    "custom": [
+      {
+        "kind": "addon-sign",
+        "argv": [
+          ["web-ext", "sign"],
+          ["npx", "web-ext", "sign"],
+          ["pnpm", "exec", "web-ext", "sign"]
+        ]
+      }
+    ]
+  },
+  "opaque": "ask"
+}
