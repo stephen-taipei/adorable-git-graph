@@ -55,7 +55,11 @@ function withinRequest<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const abort = () => {
       signal.removeEventListener('abort', abort);
-      reject(new DOMException('Aborted', 'AbortError'));
+      reject(
+        signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError'
+          ? signal.reason
+          : new DOMException('Aborted', 'AbortError'),
+      );
     };
     if (signal.aborted) {
       abort();
@@ -151,6 +155,8 @@ async function credentialScope(token: string): Promise<string> {
 function toError(err: unknown): BgError {
   if (err instanceof SourceChangedError)
     return { code: 'source_changed', message: 'Settings changed; reload the graph' };
+  if (err instanceof DOMException && err.name === 'TimeoutError')
+    return { code: 'network', message: 'Query timed out' };
   if (err instanceof GitHubError)
     return { code: err.code, message: err.message, resetAt: err.resetAt };
   return { code: 'unknown', message: 'Query unavailable' };
@@ -172,56 +178,113 @@ async function clearCache() {
   if (keys.length) await chrome.storage.local.remove(keys);
 }
 
-async function fetchGraph(
-  req: Extract<BgRequest, { type: 'fetch-graph' }>,
+type GraphRequest = Extract<BgRequest, { type: 'fetch-graph' }>;
+type SettingsScope = Awaited<ReturnType<typeof readScopedSettings>>;
+async function validateSettingsScope(scoped: SettingsScope, signal: AbortSignal): Promise<void> {
+  assertGeneration(scoped.generation, scoped.tag);
+  await withinRequest(cacheInvalidation, signal);
+  assertGeneration(scoped.generation, scoped.tag);
+  await withinRequest(readScopedSettings(), signal);
+  assertGeneration(scoped.generation, scoped.tag);
+  await withinRequest(cacheInvalidation, signal);
+  assertGeneration(scoped.generation, scoped.tag);
+  signal.throwIfAborted();
+}
+async function fetchGraphScoped(
+  req: GraphRequest,
+  scoped: SettingsScope,
 ): Promise<FetchGraphResponse> {
   try {
+    // A shared producer owns its deadline; an individual consumer cannot cancel it.
     const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const { settings, generation, tag } = scoped;
     await withinRequest(cacheInvalidation, signal);
-    const { settings, generation, tag } = await withinRequest(readScopedSettings(), signal);
-    await withinRequest(cacheInvalidation, signal);
-    assertGeneration(generation);
-    const scope = await credentialScope(settings.token);
-    assertGeneration(generation);
-    const key =
-      `${CACHE_PREFIX}${req.owner}/${req.repo}#${req.branchHint ?? ''}#${settings.maxBranches}x${settings.maxCommitsPerBranch}`.toLowerCase();
+    assertGeneration(generation, tag);
+    const scope = await withinRequest(credentialScope(settings.token), signal);
+    assertGeneration(generation, tag);
+    const key = (
+      CACHE_PREFIX +
+      req.owner +
+      '/' +
+      req.repo +
+      '#' +
+      (req.branchHint ?? '') +
+      '#' +
+      settings.maxBranches +
+      'x' +
+      settings.maxCommitsPerBranch
+    ).toLowerCase();
     if (!req.force && settings.cacheMinutes > 0) {
-      const hit = (await chrome.storage.local.get(key))[key] as CacheEntry | undefined;
-      assertGeneration(generation);
+      const hit = (await withinRequest(chrome.storage.local.get(key), signal))[key] as
+        CacheEntry | undefined;
+      assertGeneration(generation, tag);
       if (
         hit &&
         hit.credentialScope === scope &&
         Date.now() - hit.savedAt < settings.cacheMinutes * 60_000
-      )
+      ) {
+        await validateSettingsScope(scoped, signal);
         return { ok: true, data: { graph: hit.graph, fromCache: true, diagnosticGeneration: tag } };
+      }
     }
-    const graph = await fetchGitHubGraph(req.owner, req.repo, {
-      token: settings.token || undefined,
-      apiBase: __AGG_API_BASE__,
-      branchHint: req.branchHint,
-      maxBranches: settings.maxBranches,
-      maxCommitsPerBranch: settings.maxCommitsPerBranch,
+    const graph = await withinRequest(
+      fetchGitHubGraph(req.owner, req.repo, {
+        token: settings.token || undefined,
+        apiBase: __AGG_API_BASE__,
+        branchHint: req.branchHint,
+        maxBranches: settings.maxBranches,
+        maxCommitsPerBranch: settings.maxCommitsPerBranch,
+        signal,
+      }),
       signal,
-    });
-    if (generation !== settingsGeneration)
-      return {
-        ok: false,
-        error: { code: 'network', message: 'Settings changed; query cancelled' },
-      };
+    );
+    await validateSettingsScope(scoped, signal);
     if (settings.cacheMinutes > 0) {
-      await chrome.storage.local.set({
-        [key]: { savedAt: Date.now(), graph, credentialScope: scope } satisfies CacheEntry,
-      });
-      await pruneCache();
-    }
-    if (generation !== settingsGeneration) {
-      await invalidateCache();
-      return {
-        ok: false,
-        error: { code: 'network', message: 'Settings changed; query cancelled' },
-      };
+      try {
+        // Await the actual write so a late stale write cannot land after its cleanup.
+        await chrome.storage.local.set({
+          [key]: { savedAt: Date.now(), graph, credentialScope: scope } satisfies CacheEntry,
+        });
+        await pruneCache();
+        await validateSettingsScope(scoped, signal);
+      } catch (err) {
+        // A previously failed clear stays failed until an explicit retry/setting change.
+        await cacheInvalidation;
+        await invalidateCache();
+        throw err;
+      }
     }
     return { ok: true, data: { graph, fromCache: false, diagnosticGeneration: tag } };
+  } catch (err) {
+    return { ok: false, error: toError(err) };
+  }
+}
+async function fetchGraph(req: GraphRequest): Promise<FetchGraphResponse> {
+  try {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    await withinRequest(cacheInvalidation, signal);
+    const scoped = await withinRequest(readScopedSettings(), signal);
+    await withinRequest(cacheInvalidation, signal);
+    assertGeneration(scoped.generation, scoped.tag);
+    signal.throwIfAborted();
+    const key = JSON.stringify([
+      scoped.generation,
+      scoped.tag,
+      req.owner,
+      req.repo,
+      req.branchHint ?? '',
+      Boolean(req.force),
+    ]);
+    let pending = inflight.get(key);
+    if (!pending) {
+      pending = fetchGraphScoped(req, scoped).finally(() => {
+        if (inflight.get(key) === pending) inflight.delete(key);
+      });
+      inflight.set(key, pending);
+    }
+    const response = await withinRequest(pending, signal);
+    await validateSettingsScope(scoped, signal);
+    return response;
   } catch (err) {
     return { ok: false, error: toError(err) };
   }
@@ -325,6 +388,7 @@ chrome.runtime.onMessage.addListener(
                       )
                     : adapter.pullRequest!(query.number, signal);
             const data = await withinRequest<Awaited<typeof work>>(work, signal);
+            await validateSettingsScope(scoped, signal);
             assertGeneration(generation, req.generation);
             signal.throwIfAborted();
             sendResponse({ ok: true, data });
@@ -357,15 +421,7 @@ chrome.runtime.onMessage.addListener(
           });
           return false;
         }
-        const key = `${req.owner}/${req.repo}#${req.branchHint ?? ''}#${req.force ? 'f' : ''}`;
-        let p = inflight.get(key);
-        if (!p) {
-          p = fetchGraph(req).finally(() => {
-            if (inflight.get(key) === p) inflight.delete(key);
-          });
-          inflight.set(key, p);
-        }
-        void p.then(sendResponse);
+        void fetchGraph(req).then(sendResponse);
         return true;
       }
       case 'rate-limit':

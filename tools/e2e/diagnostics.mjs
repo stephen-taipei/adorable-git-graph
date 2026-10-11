@@ -11,6 +11,11 @@ import { findChrome } from './chrome-path.mjs';
 import { fakeGithubPage, startFakeGithub } from './fake-github-page.mjs';
 import { OUTSIDE_SHA, sha, seen, latency, startMock } from './mock-github-api.mjs';
 import { inkRatio } from './pixels.mjs';
+import {
+  cleanupWebSourceIdentity,
+  prepareWebSourceIdentity,
+  verifyWebSourceIdentity,
+} from './source-identity.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(resolve(root, 'apps/web/package.json'));
 const { chromium } = require('playwright-core');
@@ -114,6 +119,7 @@ try {
   server = await startMock();
   const api = `http://127.0.0.1:${server.address().port}`;
   if (mode === 'local') {
+    prepareWebSourceIdentity(root);
     const head = fixture();
     child = spawn(
       process.execPath,
@@ -173,6 +179,7 @@ try {
       body: JSON.stringify({ operation: 'compare', base: 'main', head: 'topic' }),
     });
     assert.equal(forbidden.status, 403);
+    await verifyWebSourceIdentity({ page, ctx, api, root });
     await page.goto(`http://localhost:4277/?repo=demo/adorable-git-graph&pull=7`);
   } else {
     const extension = resolve(owned, 'extension');
@@ -502,5 +509,6 @@ try {
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
   }
+  if (mode === 'local') cleanupWebSourceIdentity(root);
   rmSync(owned, { recursive: true, force: true });
 }
