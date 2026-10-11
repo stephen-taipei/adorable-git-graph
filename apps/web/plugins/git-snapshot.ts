@@ -14,12 +14,16 @@ import {
   buildGitGraphData,
   parseForEachRef,
   selectRefs,
+  coverage,
+  isDiagnosticRequest,
 } from '@adorable/graph-core';
+import { createLocalDiagnostics } from './diagnostics.ts';
 import {
   DEFAULT_REPO,
   HMR_EVENT,
   REPOS_ENDPOINT,
   SNAPSHOT_ENDPOINT,
+  DIAGNOSTICS_ENDPOINT,
   isRepoId,
   snapshotKey,
 } from '../src/protocol.ts';
@@ -139,9 +143,70 @@ const REPO_LOCATING_ENV = [
 
 function gitEnv(): NodeJS.ProcessEnv {
   // 唯讀操作也避免 index 鎖，LC_ALL 讓輸出格式（含錯誤訊息）穩定
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_NO_LAZY_FETCH: '1',
+    GIT_TERMINAL_PROMPT: '0',
+    LC_ALL: 'C',
+  };
   for (const name of REPO_LOCATING_ENV) delete env[name];
   return env;
+}
+
+const diagnosticGitSupport = new Map<string, Promise<boolean>>();
+/** Missing promisor objects must never cause implicit downloads or write refs/index. */
+export async function runDiagnosticGit(
+  repoDir: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  const bin = findGit();
+  if (!bin) throw new Error('git_unavailable');
+  const env = gitEnv();
+  for (const key of Object.keys(env)) {
+    if (/^GIT_CONFIG(?:_|$)/.test(key) || /^GIT_(?:GLOB|NOGLOB|ICASE)_PATHSPECS$/.test(key))
+      delete env[key];
+  }
+  let supported = diagnosticGitSupport.get(bin);
+  if (!supported) {
+    supported = execFileAsync(bin, ['--no-lazy-fetch', '--version'], { env, timeout: 5000 }).then(
+      () => true,
+      () => false,
+    );
+    diagnosticGitSupport.set(bin, supported);
+  }
+  if (!(await supported)) throw new Error('safe_git_unavailable');
+  try {
+    const pending = execFileAsync(
+      bin,
+      [
+        '--no-pager',
+        '--no-lazy-fetch',
+        '--no-replace-objects',
+        '--literal-pathspecs',
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        'log.showSignature=false',
+        '-c',
+        'color.ui=false',
+        '-C',
+        repoDir,
+        ...args,
+      ],
+      { env, timeout: 15_000, maxBuffer: 8 * 1024 * 1024, signal },
+    );
+    pending.child.stdin?.end();
+    const { stdout } = await pending;
+    return stdout;
+  } catch (err) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const code = (err as { code?: unknown }).code;
+    throw Object.assign(new Error('git_query_failed'), {
+      code: typeof code === 'number' ? code : undefined,
+    });
+  }
 }
 
 /** 不經 shell（execFile），參數全是我們組出來的 ref 名稱，不會被當成選項。 */
@@ -150,12 +215,39 @@ async function git(cwd: string, args: string[]): Promise<string> {
   if (!bin) throw Object.assign(new Error('git is not installed'), { code: 'ENOENT' });
   // `-C` 而不是 spawn 的 cwd：spawn 會等子行程 chdir 完才回來，目錄在卡住的網路磁碟上時整個 dev server 會跟著停住；
   // 交給 git 自己 chdir，卡住的只有那個子行程（60 秒後被砍掉）
-  const { stdout } = await execFileAsync(bin, ['-C', cwd, ...args], {
-    maxBuffer: 256 * 1024 * 1024,
-    // 網路磁碟卡住等：不要讓 git 子行程與等待中的請求永遠掛著
-    timeout: 60_000,
-    env: gitEnv(),
-  });
+  let supported = diagnosticGitSupport.get(bin);
+  if (!supported) {
+    supported = execFileAsync(bin, ['--no-lazy-fetch', '--version'], {
+      env: gitEnv(),
+      timeout: 5000,
+    }).then(
+      () => true,
+      () => false,
+    );
+    diagnosticGitSupport.set(bin, supported);
+  }
+  if (!(await supported)) throw new Error('safe_git_unavailable');
+  const { stdout } = await execFileAsync(
+    bin,
+    [
+      '--no-pager',
+      '--no-lazy-fetch',
+      '--no-replace-objects',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'log.showSignature=false',
+      '-C',
+      cwd,
+      ...args,
+    ],
+    {
+      maxBuffer: 256 * 1024 * 1024,
+      // 網路磁碟卡住等：不要讓 git 子行程與等待中的請求永遠掛著
+      timeout: 60_000,
+      env: gitEnv(),
+    },
+  );
   return stdout;
 }
 
@@ -278,11 +370,10 @@ export async function readGitSnapshot(
     });
 
     // branch 一個都沒有（CI 的 detached HEAD 等）時改從 HEAD 往回走
-    const logRefs = selected.logRefs.length
-      ? selected.logRefs
-      : (await gitOrUndefined(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']))
-        ? ['HEAD']
-        : [];
+    const detachedTip = selected.logRefs.length
+      ? undefined
+      : await gitOrUndefined(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+    const logRefs = selected.logRefs.length ? selected.logRefs : detachedTip ? [detachedTip] : [];
 
     // 先把選好的 ref 解析成 sha，再交給 git log：避免讀取途中 ref 移動造成「branch 標籤落後最新 commit」的不一致快照
     const tips = selected.refs.length ? [...new Set(selected.refs.map((r) => r.sha))] : logRefs;
@@ -326,6 +417,28 @@ export async function readGitSnapshot(
     });
     // shallow clone 的邊界 commit 看起來像 root：至少要讓畫面標示「更早的歷史已省略」
     if (shallow === 'true') graph.truncated = true;
+    const branchTotal = allRefs.filter((r) => r.kind === 'branch').length;
+    const branchLoaded = graph.refs.filter((r) => r.kind === 'branch').length;
+    const omittedRefs = graph.refs.length < allRefs.length;
+    graph.coverage = {
+      source: 'local',
+      observedAt: generatedAt,
+      remoteRefsAreLocal: true,
+      refs: coverage(
+        omittedRefs ? 'partial' : 'complete',
+        omittedRefs ? ['ref_selection'] : [],
+        branchLoaded,
+        branchTotal,
+      ),
+      commits: coverage(
+        graph.truncated ? 'partial' : 'complete',
+        [
+          ...(shallow === 'true' ? ['shallow'] : []),
+          ...(graph.truncated && shallow !== 'true' ? ['history_limit'] : []),
+        ],
+        graph.commits.length,
+      ),
+    };
     return { graph, generatedAt };
   } catch (err) {
     if (err instanceof SnapshotError) return fail(err.message, err.code);
@@ -718,14 +831,19 @@ class RepoSession {
         ),
       ];
       if (this.stopped) return;
+      const startingSignature = await refsSignature(this.dir);
+      if (this.stopped) return;
       stopWatching = watchGitRefs(dirs, onChange);
       this.watching = true;
+      // Reconcile the snapshot with refs observed after installing native watchers.
+      await this.sync();
+      if (this.stopped) return;
 
       // 安全網：檔案監看可能漏事件（網路磁碟、inotify 上限…），偶爾比對一次 ref 簽章
       // 一次只跑一輪：上一輪的 git 還沒回來（網路磁碟很慢）就不要再疊新的行程
       const pollMs = this.hooks.options.pollMs ?? 2000;
       if (pollMs > 0) {
-        let sig = await refsSignature(this.dir);
+        let sig = startingSignature;
         const tick = () => {
           if (this.stopped) return;
           poll = setTimeout(() => {
@@ -1117,6 +1235,72 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
       saveAdded();
       return { status: 200, body: { repo: toPublic(entry) } };
     };
+
+    server.middlewares.use(DIAGNOSTICS_ENDPOINT, (req, res) => {
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
+      if (!isLoopback(req) || !isSameOrigin(req, false))
+        return sendJson(res, 403, { error: 'local_only' });
+      if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? ''))
+        return sendJson(res, 415, { error: 'unsupported_media_type' });
+      const ctrl = new AbortController();
+      req.once('aborted', () => ctrl.abort());
+      res.once('close', () => {
+        if (!res.writableEnded) ctrl.abort();
+      });
+      void readBody(req, 16384)
+        .then(
+          async (raw) => {
+            let body: Record<string, unknown>;
+            try {
+              body = JSON.parse(raw);
+            } catch {
+              return sendJson(res, 400, { error: 'invalid_request' });
+            }
+            if (!body || Array.isArray(body) || typeof body !== 'object')
+              return sendJson(res, 400, { error: 'invalid_request' });
+            if (
+              !isDiagnosticRequest(body) ||
+              body.operation === 'pull-request' ||
+              (body as Record<string, unknown>)['commitRepo'] !== undefined ||
+              (body as Record<string, unknown>)['headRepo'] !== undefined
+            )
+              return sendJson(res, 400, { error: 'invalid_request' });
+            const id = (body as Record<string, unknown>)['repo'] ?? DEFAULT_REPO;
+            if (typeof id !== 'string' || !isRepoId(id))
+              return sendJson(res, 400, { error: 'invalid_repo' });
+            const entry = id === DEFAULT_REPO ? defaultEntry : await findEntry(id);
+            if (!entry) return sendJson(res, 404, { error: 'unknown_repo' });
+            const adapter = createLocalDiagnostics(entry.dir, (args, signal) =>
+              runDiagnosticGit(entry.dir, args, signal),
+            );
+            let data: unknown;
+            switch (body['operation']) {
+              case 'compare':
+                data = await adapter.compare(body.base, body.head, ctrl.signal);
+                break;
+              case 'changes':
+                data = await adapter.changes(body.sha, body.parent, ctrl.signal);
+                break;
+              case 'patch':
+                data = await adapter.patch(
+                  body.base,
+                  body.head,
+                  body.path,
+                  body.previousPath,
+                  ctrl.signal,
+                );
+                break;
+              default:
+                return sendJson(res, 400, { error: 'invalid_operation' });
+            }
+            if (!ctrl.signal.aborted) sendJson(res, 200, data);
+          },
+          () => sendJson(res, 413, { error: 'too_large' }),
+        )
+        .catch(() => {
+          if (!ctrl.signal.aborted) sendJson(res, 422, { error: 'diagnostic_unavailable' });
+        });
+    });
 
     server.middlewares.use(SNAPSHOT_ENDPOINT, (req, res) => {
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'method_not_allowed' });

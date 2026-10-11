@@ -5,3 +5,5 @@ export * from './insights.ts';
 export * from './github.ts';
 export * from './demo.ts';
 export * from './git-log.ts';
+export * from './diagnostics.ts';
+export * from './github-diagnostics.ts';

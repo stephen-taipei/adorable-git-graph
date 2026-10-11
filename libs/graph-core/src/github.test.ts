@@ -43,9 +43,9 @@ function fakeApi(overrides: Record<string, () => Response> = {}) {
     if (key === '/repos/o/r/tags') return json([{ name: 'v1', commit: { sha: sha(2) } }]);
     if (key === '/repos/o/r/commits') {
       const branch = url.searchParams.get('sha');
-      if (branch === 'main')
+      if (branch === sha(4))
         return json([apiCommit(4, 3), apiCommit(3, 2), apiCommit(2, 1), apiCommit(1)]);
-      if (branch === 'feat/x') return json([apiCommit(3, 2), apiCommit(2, 1), apiCommit(1)]);
+      if (branch === sha(3)) return json([apiCommit(3, 2), apiCommit(2, 1), apiCommit(1)]);
       return json([apiCommit(1)]);
     }
     return new Response('{}', { status: 404 });
@@ -177,4 +177,12 @@ describe('fetchGitHubGraph', () => {
     await fetchGitHubGraph('o', 'r', { fetchImpl: spy, token: 'secret', maxBranches: 1 });
     expect(auth).toBe('Bearer secret');
   });
+});
+
+it('does not report tags as absent when the tag query failed', async () => {
+  const mock = fakeApi({ '/repos/o/r/tags': () => new Response('{}', { status: 503 }) });
+  const result = await fetchGitHubGraph('o', 'r', { fetchImpl: mock.impl });
+  expect(result.coverage?.refs.status).toBe('partial');
+  expect(result.coverage?.refs.reasons).toContain('tags_unavailable');
+  expect(result.coverage?.commits.status).toBe('complete');
 });

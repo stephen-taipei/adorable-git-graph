@@ -1508,3 +1508,167 @@
     animation: none;
   }
 }
+
+/* Read-only source diagnostics; independent of the graph display window. */
+.agg-diag-coverage,
+.agg-diagnostics {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  min-width: 0;
+  margin: 6px 14px 0;
+  color: var(--agg-card-ink);
+  background: var(--agg-card);
+  border: 1px solid var(--agg-card-ink);
+  border-radius: 10px;
+}
+.agg-diag-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 10px;
+  font-size: 11px;
+  max-height: 94px;
+  overflow: auto;
+}
+.agg-diag-coverage-text details {
+  display: inline-block;
+  margin-left: 6px;
+}
+.agg-diag-coverage-text summary {
+  cursor: pointer;
+}
+.agg-diag-coverage-text ul {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+.agg-diagnostics {
+  max-height: 42%;
+  overflow: auto;
+}
+.agg-diag-toggle {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.agg-diag-body {
+  padding: 8px 12px 14px;
+  border-top: 1px solid var(--agg-line);
+  user-select: text;
+}
+.agg-diag-body button,
+.agg-diag-body input,
+.agg-diag-body select {
+  color: var(--agg-card-ink);
+  background: var(--agg-card);
+  border: 1px solid var(--agg-card-ink);
+  border-radius: 5px;
+  padding: 5px;
+  font: inherit;
+  max-width: 100%;
+}
+.agg-diag-body button {
+  cursor: pointer;
+}
+.agg-diag-body button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.agg-diag-compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+.agg-diag-compare label {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 100px;
+}
+.agg-diag-body small {
+  display: block;
+  color: var(--agg-card-muted);
+  overflow-wrap: anywhere;
+}
+.agg-diag-body code {
+  overflow-wrap: anywhere;
+}
+.agg-diag-section {
+  margin-top: 14px;
+}
+.agg-diag-section h3,
+.agg-diag-section h4 {
+  margin: 8px 0;
+}
+.agg-diag-facts {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+  gap: 5px 10px;
+}
+.agg-diag-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.agg-diag-files,
+.agg-diag-commits {
+  padding-left: 20px;
+  display: grid;
+  gap: 7px;
+}
+.agg-diag-patch pre {
+  white-space: pre;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--agg-line);
+}
+.agg-diag-body a {
+  color: var(--agg-card-ink);
+  text-decoration: underline;
+}
+.agg-diag-body :focus-visible,
+.agg-diag-toggle:focus-visible {
+  outline: 3px solid var(--agg-pop);
+  outline-offset: 2px;
+}
+.agg-root[data-reduced-motion] *,
+.agg-root[data-reduced-motion] *::before,
+.agg-root[data-reduced-motion] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+@media (max-height: 560px) {
+  .agg-diag-coverage {
+    max-height: 42px;
+  }
+  .agg-diagnostics {
+    max-height: 35%;
+  }
+}
+.agg-diag-compare input {
+  min-width: 0;
+  width: 100%;
+}
+.agg-diag-compare label {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  .agg-diagnostics {
+    max-height: 36%;
+  }
+}

@@ -71,3 +71,33 @@ describe('local repo ids in the url', () => {
     expect(localSource('0123456789ab')).toEqual({ kind: 'local', id: '0123456789ab' });
   });
 });
+
+describe('GitHub diagnostic context', () => {
+  it('retains commit and PR context in URL round-trips', () => {
+    const commit = 'a'.repeat(40);
+    expect(parseRepoInput(`https://github.com/o/r/commit/${commit}`)).toEqual({
+      owner: 'o',
+      repo: 'r',
+      commit,
+    });
+    expect(parseRepoInput('https://github.com/o/r/pull/7/files')).toEqual({
+      owner: 'o',
+      repo: 'r',
+      pullRequest: 7,
+    });
+    expect(
+      sourceFromSearch(searchFromSource({ kind: 'github', owner: 'o', repo: 'r', commit })),
+    ).toEqual({ kind: 'github', owner: 'o', repo: 'r', commit });
+    expect(sourceFromSearch('?repo=o/r&pull=7')).toEqual({
+      kind: 'github',
+      owner: 'o',
+      repo: 'r',
+      pullRequest: 7,
+    });
+    expect(sourceFromSearch('?repo=o/r&pull=-1&commit=--bad')).toEqual({
+      kind: 'github',
+      owner: 'o',
+      repo: 'r',
+    });
+  });
+});

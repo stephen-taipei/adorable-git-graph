@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import snapshot from 'virtual:git-snapshot';
-import { GitHubError, buildLayout, fetchGitHubGraph } from '@adorable/graph-core';
+import {
+  GitHubError,
+  buildLayout,
+  fetchGitHubGraph,
+  createGitHubDiagnostics,
+  cacheDiagnostics,
+} from '@adorable/graph-core';
+import type { DiagnosticAdapter } from '@adorable/graph-core';
+import { createLocalAdapter } from './diagnostics';
 import type { GraphData } from '@adorable/graph-core';
 import type { ViewerState } from '@adorable/graph-ui';
 import { DEFAULT_REPO, HMR_EVENT, isRepoId, snapshotKey } from './protocol';
@@ -183,6 +191,7 @@ function useGitHubGraph(source: Source, token: string) {
       signal: ctrl.signal,
     }).then(
       (graph) => {
+        if (ctrl.signal.aborted) return;
         writeGhCache(key, graph, Boolean(token));
         setRefreshing(false);
         setRemote({ kind: 'ready', graph });
@@ -210,6 +219,7 @@ function useGitHubGraph(source: Source, token: string) {
 }
 
 export interface GraphSource {
+  diagnostics?: DiagnosticAdapter;
   state: ViewerState;
   /** 沒有後端可重讀時（靜態建置的本機快照）為 undefined，UI 不顯示重新整理。 */
   refresh: (() => void) | undefined;
@@ -223,6 +233,29 @@ export function useGraphSource(source: Source, token: string): GraphSource {
     import.meta.env.DEV && source.kind === 'local' ? (source.id ?? DEFAULT_REPO) : DEFAULT_REPO;
   const local = useLocalSnapshot(localId, source);
   const gh = useGitHubGraph(source, token);
+  const diagnostics = useMemo(
+    () =>
+      source.kind === 'github'
+        ? cacheDiagnostics({
+            ...createGitHubDiagnostics(source.owner, source.repo, {
+              token: token || undefined,
+              apiBase: API_BASE,
+            }),
+            context: { commit: source.commit, pullRequest: source.pullRequest },
+          })
+        : import.meta.env.DEV
+          ? cacheDiagnostics(createLocalAdapter(localId))
+          : undefined,
+    [
+      source.kind,
+      source.kind === 'github' ? source.owner : '',
+      source.kind === 'github' ? source.repo : '',
+      source.kind === 'github' ? source.commit : '',
+      source.kind === 'github' ? source.pullRequest : '',
+      localId,
+      token,
+    ],
+  );
   // dev server 說不認得 / 不給看這個 repo 時，不要繼續顯示快取的舊圖（它不會再更新了）
   const localSnap =
     local.missing === 'unknown' || local.missing === LOCAL_ONLY ? undefined : local.snap;
@@ -270,6 +303,7 @@ export function useGraphSource(source: Source, token: string): GraphSource {
 
   return {
     state,
+    diagnostics,
     refresh:
       source.kind === 'github'
         ? gh.refresh

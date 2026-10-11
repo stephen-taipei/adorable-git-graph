@@ -40,6 +40,7 @@ export function findFirefox() {
  * 用虛擬 X server（Xvfb）提供 GLX + Mesa 軟體繪圖，--headless 照開也能跑 WebGL 2。已有 DISPLAY（例如 xvfb-run）就沿用。
  */
 export function startXvfb() {
+  if (process.platform !== 'linux') return Promise.resolve({ display: undefined, stop() {} });
   if (process.env.DISPLAY) return Promise.resolve({ display: process.env.DISPLAY, stop() {} });
   return new Promise((resolve, reject) => {
     const p = spawn(

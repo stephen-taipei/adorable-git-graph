@@ -36,7 +36,7 @@ export function App() {
   const [theme, setTheme] = useStored('agg.theme', 'auto', isThemeSetting);
   const [token, setToken] = useState(() => readStored(TOKEN_KEY) ?? '');
   const [tokenOpen, setTokenOpen] = useState(false);
-  const { state, refresh, repoName } = useGraphSource(source, token);
+  const { state, refresh, repoName, diagnostics } = useGraphSource(source, token);
 
   const title = repoName
     ? repoName.owner === 'local'
@@ -56,6 +56,7 @@ export function App() {
       <GitGraphViewer
         title={title}
         state={state}
+        diagnostics={diagnostics}
         theme={theme === 'auto' ? 'auto' : theme}
         locale={locale}
         sourceKey={

@@ -1,3 +1,5 @@
+import type { GraphCoverage } from './diagnostics.ts';
+
 /** 與資料來源無關的 git 歷史輸入模型（GitHub API / 本機 git log 皆可轉成這個格式）。 */
 export interface CommitInput {
   sha: string;
@@ -31,6 +33,7 @@ export interface RepoInfo {
 }
 
 export interface GraphData {
+  coverage?: GraphCoverage;
   repo: RepoInfo;
   commits: CommitInput[];
   refs: RefInput[];
@@ -97,6 +100,8 @@ export interface GraphBranch {
 }
 
 export interface GraphLayout {
+  coverage?: GraphCoverage;
+  fetchedAt?: number;
   repo: RepoInfo;
   /** 由新到舊（列順序）。 */
   nodes: GraphNode[];

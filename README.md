@@ -10,12 +10,19 @@ branch 是流動著箭頭的管線，merge / fork 會自己長出來。版面是
 | **1b** | `apps/extension-firefox` — Firefox（MV3）版，與 Chrome 版共用同一份原始碼                                          | ✅   |
 | **2**  | `apps/web` — `pnpm start` 於 localhost 查看本專案或**任何本機 repo** 的 git graph（與 extension 共用同一套 UI/UX） | ✅   |
 
+## RD 日常診斷
+
+新版為唯讀診斷助手：`repo → base/head → 雙向獨有 commits → changed files → lazy diff → 含 SHA 的摘要`。圖形涵蓋範圍、來源查詢完整性與取得時間分開顯示。資料不足保留 `unknown`／`null`，不把載入集合當完整 Git 結論。
+
+GitHub commit／PR 頁面直接保留調查脈絡。PR 先提供基本資訊與固定 base/head SHA。完整操作、查詢語意、Chrome／Firefox 安裝更新與限制見 [RD 診斷文件](docs/rd-diagnostics.md)；測試範圍與未驗證項目見 [驗證紀錄](docs/rd-validation.md)；試用門檻與資料最小化方案見 [RD 試用方案](docs/rd-pilot.md)。試用指標尚未實測。
+
 ## 快速開始
 
 需求：Node ≥ 22.18、pnpm ≥ 10.16（`packageManager` 已鎖定）。
 
 ```bash
 pnpm install
+pnpm start --repo ~/code/repo  # 看指定 repo（省略 --repo 則看本專案）
 pnpm start            # 階段 2：http://localhost:4200 ，預設顯示「本專案」，可從選單換成其他本機 repo
 pnpm build            # 建置所有專案：Chrome → apps/extension/dist、Firefox → apps/extension-firefox/dist、web → apps/web/dist
 ```
@@ -144,6 +151,7 @@ RWD 以 viewer 自己的寬度判斷（不是視窗寬度）：**寬**（≥ 980
 ### 開發
 
 ```bash
+pnpm start --repo ~/code/repo  # 看指定 repo（省略 --repo 則看本專案）
 pnpm start            # web app（http://localhost:4200）
 pnpm dev              # Chrome extension watch build（改完到 chrome://extensions 按重新載入）
 pnpm dev:firefox      # Firefox extension watch build

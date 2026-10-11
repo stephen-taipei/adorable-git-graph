@@ -346,6 +346,18 @@ esac
   });
 });
 
+async function awaitWatcherReady(gitDir: string, calls: () => number) {
+  const ref = join(gitDir, 'refs', 'heads', 'main');
+  const value = readFileSync(ref);
+  const before = calls();
+  // Native fs.watch has no ready event. Verify a real callback before asserting later updates.
+  await waitFor(() => {
+    if (calls() > before) return true;
+    writeFileSync(ref, value);
+    return false;
+  }, 3000);
+}
+
 describe('watchGitRefs (regression: live updates must keep working after the first change)', () => {
   it('fires for EVERY consecutive commit, branch switch and ref update — not just the first', async () => {
     const dir = tmp('agg-watch-');
@@ -356,6 +368,7 @@ describe('watchGitRefs (regression: live updates must keep working after the fir
     let calls = 0;
     const stop = watchGitRefs([gitDir], () => calls++);
     try {
+      await awaitWatcherReady(gitDir, () => calls);
       const expectEvent = async (label: string, action: () => void) => {
         const before = calls;
         action();
@@ -389,6 +402,7 @@ describe('watchGitRefs (regression: live updates must keep working after the fir
     let calls = 0;
     const stop = watchGitRefs([gitDir], () => calls++);
     try {
+      await awaitWatcherReady(gitDir, () => calls);
       const expectEvent = async (label: string, action: () => void) => {
         const before = calls;
         action();
@@ -434,8 +448,10 @@ describe('watchGitRefs (regression: live updates must keep working after the fir
     let calls = 0;
     const stop = watchGitRefs([join(dir, '.git')], () => calls++);
     try {
+      await awaitWatcherReady(join(dir, '.git'), () => calls);
+      const before = calls;
       git(dir, 'branch', 'feat/linked');
-      await waitFor(() => calls > 0, 4000);
+      await waitFor(() => calls > before, 4000);
     } finally {
       stop();
     }
@@ -523,6 +539,7 @@ describe('gitSnapshot plugin (dev server behaviour)', () => {
         const res = {
           statusCode: 200,
           setHeader() {},
+          once() {},
           end(text = '') {
             resolve({ status: this.statusCode, body: text, json: () => JSON.parse(text) });
           },
@@ -672,6 +689,61 @@ describe('gitSnapshot plugin (dev server behaviour)', () => {
       gamma: repo('group/gamma', ['g1']),
     };
   }
+
+  it('serves diagnostics only for loopback same-origin JSON and opaque repo ids', async () => {
+    const p = await startPlugin(root);
+    const post = (value: unknown, headers: Record<string, string> = {}, remote = '127.0.0.1') =>
+      p.call({
+        path: '/__agg/diagnostics',
+        method: 'POST',
+        headers: {
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          ...headers,
+        },
+        remote,
+        body: JSON.stringify(value),
+      });
+    try {
+      const result = await post({ operation: 'compare', base: 'main', head: 'feat/x' });
+      expect(result.status).toBe(200);
+      expect(result.json().base.sha).toHaveLength(40);
+      expect(result.body).not.toContain(root);
+      expect(
+        (
+          await post(
+            { operation: 'compare', base: 'main', head: 'main' },
+            { 'sec-fetch-site': 'cross-site' },
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (await post({ operation: 'compare', base: 'main', head: 'main' }, {}, '192.0.2.4')).status,
+      ).toBe(403);
+      expect(
+        (
+          await post(
+            { operation: 'compare', base: 'main', head: 'main' },
+            { 'content-type': 'text/plain' },
+          )
+        ).status,
+      ).toBe(415);
+      expect((await post({ operation: 'compare', base: '--bad', head: 'main' })).status).toBe(400);
+      expect(
+        (await post({ operation: 'compare', base: 'main', head: 'main', repo: root })).status,
+      ).toBe(400);
+      expect((await post({ operation: 'changes', sha: 'main' })).status).toBe(400);
+      expect(
+        (await post({ operation: 'changes', sha: 'a'.repeat(40), commitRepo: 'fork/r' })).status,
+      ).toBe(400);
+      expect(
+        (await post({ operation: 'compare', base: 'main', head: 'main', pad: 'x'.repeat(20000) }))
+          .status,
+      ).toBe(413);
+    } finally {
+      await p.close();
+    }
+  });
 
   it('lists the default repo first, then the sibling repos — by id, never asking the browser for a path', async () => {
     const r = makeRoot();

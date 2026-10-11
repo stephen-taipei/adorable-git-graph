@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildLayout } from '@adorable/graph-core';
-import type { GraphData } from '@adorable/graph-core';
+import type { DiagnosticAdapter, GraphData } from '@adorable/graph-core';
+import { createExtensionAdapter } from './diagnostics';
 import type { ViewerState } from '@adorable/graph-ui';
 import { sendToBackground } from '../shared/messages';
 import type { FetchGraphResponse } from '../shared/messages';
@@ -12,7 +13,10 @@ type Fetched =
   | { kind: 'ready'; graph: GraphData };
 
 /** 向 background 取得 repo 的 git 歷史，並轉成 viewer 要用的 state。 */
-export function useGraph(repo: RepoRef): { state: ViewerState; refresh: () => void } {
+export function useGraph(
+  repo: RepoRef,
+  epoch = 0,
+): { state: ViewerState; refresh: () => void; diagnostics: DiagnosticAdapter } {
   const [fetched, setFetched] = useState<Fetched>({ kind: 'loading' });
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,7 +63,12 @@ export function useGraph(repo: RepoRef): { state: ViewerState; refresh: () => vo
     return () => {
       alive = false;
     };
-  }, [repo.owner, repo.repo, nonce]);
+  }, [repo.owner, repo.repo, repo.branchHint, epoch, nonce]);
+
+  const diagnostics = useMemo(
+    () => createExtensionAdapter(repo),
+    [repo.owner, repo.repo, repo.commit, repo.pullRequest, epoch, nonce],
+  );
 
   const layout = useMemo(
     () => (fetched.kind === 'ready' ? buildLayout(fetched.graph) : null),
@@ -77,5 +86,5 @@ export function useGraph(repo: RepoRef): { state: ViewerState; refresh: () => vo
     setNonce((n) => n + 1);
   }, []);
 
-  return { state, refresh };
+  return { state, refresh, diagnostics };
 }
