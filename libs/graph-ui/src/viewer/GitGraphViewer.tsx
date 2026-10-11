@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode, SetStateAction } from 'react';
 import {
   aheadCount,
   branchesContaining,
@@ -130,8 +130,27 @@ export function GitGraphViewer({
   const { width: rootWidth } = useElementSize(rootRef);
 
   const [webglFailed, setWebglFailed] = useState(false);
-  const [selectedSha, setSelectedSha] = useState<string | null>(null);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const diagnosticsScope = useMemo(() => ({}), [title, sourceKey, diagnostics]);
+  const [selection, setSelection] = useState<{ scope: object; sha: string | null }>(() => ({
+    scope: diagnosticsScope,
+    sha: null,
+  }));
+  const selectedSha = selection.scope === diagnosticsScope ? selection.sha : null;
+  const setSelectedSha = useCallback(
+    (value: SetStateAction<string | null>) => {
+      setSelection((previous) => ({
+        scope: diagnosticsScope,
+        sha:
+          typeof value === 'function'
+            ? value(previous.scope === diagnosticsScope ? previous.sha : null)
+            : value,
+      }));
+    },
+    [diagnosticsScope],
+  );
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(
+    Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest),
+  );
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(-1);
@@ -153,6 +172,7 @@ export function GitGraphViewer({
     if (!layout || lastContextKey.current === contextKey) return;
     lastContextKey.current = contextKey;
     if (hasContext) {
+      setDiagnosticsOpen(true);
       contextNavigated.current = true;
       const commit = diagnostics?.context?.commit;
       setSelectedSha(
@@ -162,7 +182,7 @@ export function GitGraphViewer({
       setQuery('');
       setCursor(-1);
     }
-  }, [contextKey, layout, diagnostics, hasContext]);
+  }, [contextKey, layout, diagnostics, hasContext, setSelectedSha]);
 
   // ── 由 layout 衍生的資料（統計、可到達性、搜尋） ──────────────────────────
   const derived = useMemo(() => {
@@ -219,7 +239,7 @@ export function GitGraphViewer({
     if (!derived) return;
     if (selectedSha && !derived.bySha.has(selectedSha)) setSelectedSha(null);
     if (focusBranch && !derived.reach.has(focusBranch)) setFocusBranch(null);
-  }, [derived, selectedSha, focusBranch]);
+  }, [derived, selectedSha, focusBranch, setSelectedSha]);
 
   // ── 捲動：保持使用者的位置、跳到某一列 ───────────────────────────────────
   const anchor = useRef<{ sha?: string; frac: number }>({ frac: 0 });
@@ -315,10 +335,10 @@ export function GitGraphViewer({
     contextNavigated.current = false;
     metricsRef.current = metrics;
     rememberAnchor();
-  }, [layout, metrics, sourceKey, rememberAnchor, contextKey, hasContext]);
+  }, [layout, metrics, sourceKey, rememberAnchor, contextKey, hasContext, setSelectedSha]);
 
   useEffect(() => {
-    if (!layout) return;
+    if (!layout || selection.scope !== diagnosticsScope) return;
     try {
       sessionStorage.setItem(
         `agg:focus:${identity}`,
@@ -334,7 +354,16 @@ export function GitGraphViewer({
     } catch {
       /* optional preference storage */
     }
-  }, [identity, contextKey, layout, selectedSha, focusBranch, query]);
+  }, [
+    identity,
+    contextKey,
+    layout,
+    selectedSha,
+    focusBranch,
+    query,
+    selection.scope,
+    diagnosticsScope,
+  ]);
 
   // 內容區與捲軸寬度（欄位標題要和列對齊）
   useLayoutEffect(() => {
@@ -373,7 +402,7 @@ export function GitGraphViewer({
       const row = sha ? derived?.bySha.get(sha)?.row : undefined;
       if (row !== undefined && how) scrollToRow(row, how);
     },
-    [derived, scrollToRow],
+    [derived, scrollToRow, setSelectedSha],
   );
 
   // 手機的底部面板在 flex 流程裡（列表的可視高度會縮小）：面板「剛打開」時，等版面更新完再把那一列捲到看得見的地方。
@@ -403,10 +432,13 @@ export function GitGraphViewer({
     if (lost) root.focus({ preventScroll: true });
   }, [selectedNode?.sha]);
 
-  const onRowSelect = useCallback((sha: string) => {
-    setSelectedSha((cur) => (cur === sha ? null : sha));
-    setSelectionRevision((value) => value + 1);
-  }, []);
+  const onRowSelect = useCallback(
+    (sha: string) => {
+      setSelectedSha((cur) => (cur === sha ? null : sha));
+      setSelectionRevision((value) => value + 1);
+    },
+    [setSelectedSha],
+  );
 
   const moveSelection = useCallback(
     (delta: number | 'first' | 'last') => {
@@ -660,6 +692,8 @@ export function GitGraphViewer({
       {layout && <CoverageNotice layout={layout} locale={loc} />}
       {layout && (
         <DiagnosticsPanel
+          scope={diagnosticsScope}
+          open={diagnosticsOpen}
           adapter={diagnostics}
           layout={layout}
           selectedSha={selectedSha}

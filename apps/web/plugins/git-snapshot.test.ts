@@ -1215,7 +1215,7 @@ describe('discoverRepos', () => {
 describe('isSameOrigin', () => {
   const req = (headers: Record<string, string>) =>
     ({ headers: { host: 'localhost:4200', ...headers } }) as never;
-  it('trusts fetch metadata first, then Origin, and allows direct requests only when asked', () => {
+  it('validates complete Origin before fetch metadata and only permits requested direct reads', () => {
     expect(isSameOrigin(req({ 'sec-fetch-site': 'same-origin' }), false)).toBe(true);
     expect(isSameOrigin(req({ 'sec-fetch-site': 'none' }), true)).toBe(true);
     expect(isSameOrigin(req({ 'sec-fetch-site': 'none' }), false)).toBe(false);
@@ -1223,6 +1223,28 @@ describe('isSameOrigin', () => {
     expect(isSameOrigin(req({ 'sec-fetch-site': 'cross-site' }), true)).toBe(false);
     expect(isSameOrigin(req({ origin: 'http://localhost:4200' }), false)).toBe(true);
     expect(isSameOrigin(req({ origin: 'http://localhost:4201' }), true)).toBe(false);
+    expect(
+      isSameOrigin(
+        req({ origin: 'https://localhost:4200', 'sec-fetch-site': 'same-origin' }),
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      isSameOrigin(req({ origin: 'http://evil.example', 'sec-fetch-site': 'same-origin' }), true),
+    ).toBe(false);
+    expect(isSameOrigin(req({ origin: 'http://fixture@localhost:4200' }), true)).toBe(false);
+    expect(
+      isSameOrigin(req({ host: 'localhost:4200/other', 'sec-fetch-site': 'same-origin' }), true),
+    ).toBe(false);
+    expect(
+      isSameOrigin(
+        {
+          headers: { host: 'localhost:4200', origin: 'https://localhost:4200' },
+          socket: { encrypted: true },
+        } as never,
+        false,
+      ),
+    ).toBe(true);
     expect(isSameOrigin(req({ origin: 'null' }), true)).toBe(false);
     expect(isSameOrigin(req({}), true)).toBe(true);
     expect(isSameOrigin(req({}), false)).toBe(false);

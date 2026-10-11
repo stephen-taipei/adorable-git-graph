@@ -157,6 +157,8 @@ export function CoverageNotice({ layout, locale }: { layout: GraphLayout; locale
 }
 type Kind = 'compare' | 'changes' | 'patch' | 'pr';
 export interface DiagnosticsPanelProps {
+  scope: object;
+  open: boolean;
   adapter?: DiagnosticAdapter;
   layout: GraphLayout;
   selectedSha?: string | null;
@@ -166,7 +168,18 @@ export interface DiagnosticsPanelProps {
   onGoto: (sha: string) => void;
   onOpenChange?: (open: boolean) => void;
 }
-export function DiagnosticsPanel({
+export function DiagnosticsPanel(props: DiagnosticsPanelProps) {
+  const [boundary, setBoundary] = useState(() => ({ scope: props.scope, revision: 0 }));
+  let current = boundary;
+  if (boundary.scope !== props.scope) {
+    current = { scope: props.scope, revision: boundary.revision + 1 };
+    setBoundary(current);
+  }
+  return <ScopedDiagnosticsPanel key={current.revision} {...props} />;
+}
+
+function ScopedDiagnosticsPanel({
+  open,
   adapter,
   layout,
   selectedSha,
@@ -189,12 +202,6 @@ export function DiagnosticsPanel({
         )?.name ?? '',
     };
   };
-  const [open, setOpen] = useState(
-    Boolean(adapter?.context?.commit || adapter?.context?.pullRequest),
-  );
-  useEffect(() => {
-    onOpenChange?.(open);
-  }, [open, onOpenChange]);
   const [inputs, setInputs] = useState(defaults);
   const [pins, setPins] = useState<{ base?: PinnedRef; head?: PinnedRef }>({});
   const [inspection, setInspection] = useState<{ sha: string; repo?: string }>();
@@ -231,23 +238,11 @@ export function DiagnosticsPanel({
     }
   };
   useEffect(() => {
-    setInputs(defaults());
-    setPins({});
-    setComparison(undefined);
-    setInspection(undefined);
-    setChanges(undefined);
-    setPr(undefined);
-    setPatch(undefined);
-    setParent(undefined);
-    setBusy({});
-    setErrors({});
-    setCopy('copy');
-    setOpen(Boolean(adapter?.context?.commit || adapter?.context?.pullRequest));
     return () => {
       requests.current.forEach((c) => c.abort());
       requests.current.clear();
     };
-  }, [adapter, sourceKey]);
+  }, []);
   useEffect(() => {
     if (!open) {
       requests.current.forEach((c) => c.abort());
@@ -428,7 +423,7 @@ export function DiagnosticsPanel({
         aria-label={tr(locale, open ? 'close' : 'open')}
         aria-expanded={open}
         aria-controls={`${id}-body`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => onOpenChange?.(!open)}
       >
         {tr(locale, 'title')} <span>{open ? '−' : '+'}</span>
       </button>

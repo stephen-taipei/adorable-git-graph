@@ -11,6 +11,7 @@ import { findChrome } from './chrome-path.mjs';
 import { fakeGithubPage, startFakeGithub } from './fake-github-page.mjs';
 import { OUTSIDE_SHA, sha, seen, latency, startMock } from './mock-github-api.mjs';
 import { inkRatio } from './pixels.mjs';
+import { cleanupViewerScope, prepareViewerScope, verifyViewerScope } from './viewer-scope.mjs';
 import {
   cleanupWebSourceIdentity,
   prepareWebSourceIdentity,
@@ -120,6 +121,7 @@ try {
   const api = `http://127.0.0.1:${server.address().port}`;
   if (mode === 'local') {
     prepareWebSourceIdentity(root);
+    prepareViewerScope(root);
     const head = fixture();
     child = spawn(
       process.execPath,
@@ -180,6 +182,7 @@ try {
     });
     assert.equal(forbidden.status, 403);
     await verifyWebSourceIdentity({ page, ctx, api, root });
+    await verifyViewerScope(page);
     await page.goto(`http://localhost:4277/?repo=demo/adorable-git-graph&pull=7`);
   } else {
     const extension = resolve(owned, 'extension');
@@ -497,6 +500,7 @@ try {
   console.error('Page errors:', errors);
   throw error;
 } finally {
+  cleanupViewerScope(root);
   latency.ms = 0;
   if (ctx) await ctx.close().catch(() => {});
   if (browser) await browser.close().catch(() => {});

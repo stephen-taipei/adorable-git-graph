@@ -71,6 +71,63 @@ const state = (d: string) => {
 };
 
 describe('read-only local source diagnostics', () => {
+  it('reports fixed-SHA gitlinks even when repository settings ignore submodules', async () => {
+    const child = repo();
+    put(child, 'child.txt', 'one\n');
+    const childBase = commit(child, 'child base');
+    put(child, 'child.txt', 'two\n');
+    const childHead = commit(child, 'child head');
+    const d = repo();
+    git(d, 'update-index', '--add', '--cacheinfo', '160000', childBase, 'vendor/mod');
+    git(d, 'commit', '-q', '-m', 'root gitlink');
+    const base = git(d, 'rev-parse', 'HEAD');
+    git(d, 'branch', 'base', base);
+    git(d, 'update-index', '--cacheinfo', '160000', childHead, 'vendor/mod');
+    git(d, 'commit', '-q', '-m', 'update gitlink');
+    const head = git(d, 'rev-parse', 'HEAD');
+    git(d, 'config', 'diff.ignoreSubmodules', 'all');
+    const expectedPaths = git(
+      d,
+      'diff',
+      '--name-only',
+      '--ignore-submodules=none',
+      base,
+      head,
+    ).split('\n');
+    expect(expectedPaths).toEqual(['vendor/mod']);
+    const before = state(d);
+    const a = adapter(d);
+    for (const result of [await a.changes(head), await a.compare('base', 'main')]) {
+      expect(result.files.map((f) => f.path)).toEqual(expectedPaths);
+      expect(result.files[0]).toMatchObject({ additions: 1, deletions: 1, binary: false });
+      expect(result.filesCoverage.status).toBe('complete');
+    }
+    const patch = await a.patch(base, head, 'vendor/mod');
+    expect(patch.coverage.status).toBe('complete');
+    expect(patch.patch).toBe(
+      git(
+        d,
+        'diff',
+        '-p',
+        '--no-color',
+        '--submodule=short',
+        '--ignore-submodules=none',
+        base,
+        head,
+        '--',
+        'vendor/mod',
+      ) + '\n',
+    );
+    expect(patch.patch).toContain(`-Subproject commit ${childBase}`);
+    expect(patch.patch).toContain(`+Subproject commit ${childHead}`);
+    const root = await a.changes(base);
+    expect(root.files.map((f) => f.path)).toEqual(['vendor/mod']);
+    expect((await a.patch(null, base, 'vendor/mod')).patch).toContain(
+      `+Subproject commit ${childBase}`,
+    );
+    expect(state(d)).toBe(before);
+  });
+
   it.each(['sha1', 'sha256'])(
     'matches exact Git divergence and root/merge-parent tree diffs (%s)',
     async (format) => {

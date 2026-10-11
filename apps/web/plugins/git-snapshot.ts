@@ -4,6 +4,8 @@ import { accessSync, constants, lstatSync, readdirSync, statSync, watch } from '
 import type { Dirent, FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
+import type { TLSSocket } from 'node:tls';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -900,20 +902,59 @@ const sendJson = (res: ServerResponse, status: number, body: unknown) => {
 /**
  * 只回應同源頁面；`direct` 時也允許沒有 fetch metadata 的直接請求（網址列、curl）。
  * 其他 localhost 埠上的頁面不能偷看本機 commit、未推送的 branch 與資料夾位置。
- * 偽造的 Host（DNS rebinding）在進到這裡之前就會被 Vite 自己的 host 檢查擋掉。
+ * Origin 必須與實際連線的 protocol、Host 及 port 一致；fetch metadata 不能覆寫衝突的 Origin。
  */
 export function isSameOrigin(req: IncomingMessage, direct: boolean): boolean {
-  const site = req.headers['sec-fetch-site'];
-  if (site) return site === 'same-origin' || (direct && site === 'none');
+  const target = requestOrigin(req);
+  if (!target) return false;
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin !== undefined) {
     try {
-      return new URL(origin).host === req.headers.host;
+      const url = new URL(origin);
+      if (
+        url.origin !== target.origin ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash
+      )
+        return false;
     } catch {
       return false;
     }
   }
-  return direct;
+  const site = req.headers['sec-fetch-site'];
+  if (site) return site === 'same-origin' || (direct && site === 'none');
+  return origin !== undefined || direct;
+}
+
+function requestOrigin(req: IncomingMessage): URL | undefined {
+  const host = req.headers.host;
+  if (!host || /[\s\\/@?#,]/.test(host)) return;
+  try {
+    const protocol = (req.socket as TLSSocket | undefined)?.encrypted ? 'https' : 'http';
+    return new URL(`${protocol}://${host}`);
+  } catch {
+    return;
+  }
+}
+
+/** Keep the local data boundary even when Vite's general allowedHosts check is disabled. */
+function isAllowedHost(req: IncomingMessage, allowedHosts: string[]): boolean {
+  const origin = requestOrigin(req);
+  if (!origin) return false;
+  const host = origin.hostname
+    .toLowerCase()
+    .replace(/\.$/, '')
+    .replace(/^\[|\]$/g, '');
+  if (isIP(host) || host === 'localhost' || host.endsWith('.localhost')) return true;
+  return allowedHosts.some((value) => {
+    const allowed = value.toLowerCase().replace(/\.$/, '');
+    return allowed.startsWith('.')
+      ? host === allowed.slice(1) || host.endsWith(allowed)
+      : host === allowed;
+  });
 }
 
 /**
@@ -956,6 +997,7 @@ const RESOLVED_ID = `\0${VIRTUAL_ID}`;
  * 另外提供本機 repo 清單與任一 repo 的快照，讓畫面可以切換要看哪個本機 repo。
  */
 export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
+  let allowedHosts: string[] = [];
   let repoDir = options.repoDir ?? process.env['AGG_REPO_DIR'] ?? process.cwd();
   let warn: (m: string) => void = options.onWarn ?? ((m) => console.warn(`[git-snapshot] ${m}`));
   let push: (repo: string, snap: GitSnapshot) => void = () => {};
@@ -972,6 +1014,10 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
   return {
     name: 'adorable-git-snapshot',
     configResolved(config) {
+      allowedHosts = [
+        ...(Array.isArray(config.server?.allowedHosts) ? config.server.allowedHosts : []),
+        ...(typeof config.server?.host === 'string' ? [config.server.host] : []),
+      ];
       repoDir = options.repoDir ?? process.env['AGG_REPO_DIR'] ?? config.root;
       stateFile =
         options.stateFile ?? process.env['AGG_LOCAL_REPOS_FILE'] ?? defaultStateFile(config.root);
@@ -1237,6 +1283,7 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
     };
 
     server.middlewares.use(DIAGNOSTICS_ENDPOINT, (req, res) => {
+      if (!isAllowedHost(req, allowedHosts)) return sendJson(res, 403, { error: 'forbidden' });
       if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
       if (!isLoopback(req) || !isSameOrigin(req, false))
         return sendJson(res, 403, { error: 'local_only' });
@@ -1303,6 +1350,7 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
     });
 
     server.middlewares.use(SNAPSHOT_ENDPOINT, (req, res) => {
+      if (!isAllowedHost(req, allowedHosts)) return sendJson(res, 403, { error: 'forbidden' });
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'method_not_allowed' });
       if (!isSameOrigin(req, true)) return sendJson(res, 403, { error: 'forbidden' });
       let id: string;
@@ -1327,6 +1375,7 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
     });
 
     server.middlewares.use(REPOS_ENDPOINT, (req, res) => {
+      if (!isAllowedHost(req, allowedHosts)) return sendJson(res, 403, { error: 'forbidden' });
       if (req.method !== 'GET' && req.method !== 'POST')
         return sendJson(res, 405, { error: 'method_not_allowed' });
       // 本機的資料夾結構與其他 repo 只給這台電腦看（`vite --host` 時區網裡的裝置只看得到預設 repo）
