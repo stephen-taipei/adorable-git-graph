@@ -5,6 +5,7 @@ import {
   branchesContaining,
   buildReachability,
   computeStats,
+  isFullSha,
   matchesQuery,
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphLayout, GraphNode } from '@adorable/graph-core';
@@ -25,6 +26,7 @@ import type { GitGraphCanvasHandle } from './GitGraphCanvas';
 import { Mascot } from './Mascot';
 import { Toolbar } from './Toolbar';
 import { CoverageNotice, DiagnosticsPanel } from './DiagnosticsPanel';
+import type { CommitInspection } from './DiagnosticsPanel';
 import { useElementSize, usePrefersDark, usePrefersReducedMotion } from './hooks';
 import { GearIcon, PlayIcon, RefreshIcon, CloseIcon, TopIcon } from './icons';
 
@@ -55,7 +57,36 @@ export interface GitGraphViewerProps {
   headerExtra?: ReactNode;
   /** 資料來源的識別（例如 `local` / `github`）。同名 repo 換來源時不會被當成「剛 commit 了一筆」的增量更新。 */
   sourceKey?: string;
+  /** Opaque repo/URL/credential scope for restoring inspection metadata after close/reopen. */
+  viewerStateKey?: string;
   diagnostics?: DiagnosticAdapter;
+}
+
+function savedInspection(
+  key?: string,
+): { inspection?: CommitInspection; open: boolean } | undefined {
+  if (!key) return;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`agg:inspection:${key}`) ?? 'null');
+    if (!saved || saved.version !== 1 || typeof saved.open !== 'boolean') return;
+    const value = saved.inspection;
+    if (value === undefined) return { open: saved.open };
+    if (
+      !value ||
+      !isFullSha(value.sha) ||
+      (value.repo !== undefined &&
+        (typeof value.repo !== 'string' ||
+          value.repo.length > 256 ||
+          !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repo)))
+    )
+      return;
+    return {
+      open: saved.open,
+      inspection: { sha: value.sha, ...(value.repo ? { repo: value.repo } : {}) },
+    };
+  } catch {
+    /* optional metadata storage */
+  }
 }
 
 function IconButton({
@@ -106,6 +137,7 @@ export function GitGraphViewer({
   onOpenCommit,
   headerExtra,
   sourceKey,
+  viewerStateKey,
   diagnostics,
 }: GitGraphViewerProps) {
   const loc = locale ?? detectLocale();
@@ -130,14 +162,55 @@ export function GitGraphViewer({
   const { width: rootWidth } = useElementSize(rootRef);
 
   const [webglFailed, setWebglFailed] = useState(false);
-  const diagnosticsScope = useMemo(() => ({}), [title, sourceKey, diagnostics]);
+  const diagnosticsScope = useMemo(() => ({}), [title, sourceKey, diagnostics, viewerStateKey]);
+  const [inspectionState, setInspectionState] = useState(() => {
+    const saved = savedInspection(viewerStateKey);
+    return {
+      scope: diagnosticsScope,
+      value: saved?.inspection,
+      initialOpen: saved?.open,
+      canRestore: !viewerStateKey && state.kind !== 'ready',
+    };
+  });
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(
+    inspectionState.initialOpen ??
+      Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest),
+  );
+  if (inspectionState.scope !== diagnosticsScope) {
+    // A freshly mounted overlay obtains its opaque generation asynchronously.
+    // Restore once before its first ready commit; active scope changes clear it.
+    const restored =
+      inspectionState.canRestore && state.kind === 'ready'
+        ? savedInspection(viewerStateKey)
+        : undefined;
+    setInspectionState({
+      scope: diagnosticsScope,
+      value: restored?.inspection,
+      initialOpen: undefined,
+      canRestore: inspectionState.canRestore && state.kind !== 'ready',
+    });
+    if (restored) setDiagnosticsOpen(restored.open);
+  }
+  const inspection = inspectionState.scope === diagnosticsScope ? inspectionState.value : undefined;
+  const setInspection = useCallback(
+    (value?: CommitInspection) => {
+      setInspectionState({
+        scope: diagnosticsScope,
+        value,
+        initialOpen: undefined,
+        canRestore: false,
+      });
+    },
+    [diagnosticsScope],
+  );
   const [selection, setSelection] = useState<{ scope: object; sha: string | null }>(() => ({
     scope: diagnosticsScope,
     sha: null,
   }));
   const selectedSha = selection.scope === diagnosticsScope ? selection.sha : null;
   const setSelectedSha = useCallback(
-    (value: SetStateAction<string | null>) => {
+    (value: SetStateAction<string | null>, preserveInspection = false) => {
+      if (!preserveInspection) setInspection(undefined);
       setSelection((previous) => ({
         scope: diagnosticsScope,
         sha:
@@ -146,10 +219,14 @@ export function GitGraphViewer({
             : value,
       }));
     },
-    [diagnosticsScope],
+    [diagnosticsScope, setInspection],
   );
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(
-    Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest),
+  const onInspectionChange = useCallback(
+    (value?: CommitInspection) => {
+      if (value) setSelectedSha(null, true);
+      setInspection(value);
+    },
+    [setSelectedSha, setInspection],
   );
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [query, setQuery] = useState('');
@@ -159,6 +236,24 @@ export function GitGraphViewer({
 
   const layout = state.kind === 'ready' ? state.layout : null;
   const hasRows = Boolean(layout && layout.nodes.length > 0);
+  useEffect(() => {
+    if (!viewerStateKey || !layout || inspectionState.scope !== diagnosticsScope) return;
+    try {
+      sessionStorage.setItem(
+        `agg:inspection:${viewerStateKey}`,
+        JSON.stringify({ version: 1, inspection, open: diagnosticsOpen }),
+      );
+    } catch {
+      /* store metadata only, never diagnostic contents or credentials */
+    }
+  }, [
+    viewerStateKey,
+    layout,
+    inspection,
+    diagnosticsOpen,
+    inspectionState.scope,
+    diagnosticsScope,
+  ]);
 
   const contextKey = JSON.stringify([
     sourceKey ?? '',
@@ -284,6 +379,7 @@ export function GitGraphViewer({
       let saved: {
         selected?: string | null;
         contextKey?: string;
+        viewerStateKey?: string;
         branch?: string;
         query?: string;
         anchor?: string;
@@ -296,6 +392,7 @@ export function GitGraphViewer({
       }
       const sameContext =
         !contextNavigated.current &&
+        (viewerStateKey === undefined || saved.viewerStateKey === viewerStateKey) &&
         (saved.contextKey === contextKey || (!hasContext && saved.contextKey === undefined));
       if (!sameContext) saved = {};
       const restored = saved.anchor ? layout.nodes.find((n) => n.sha === saved.anchor) : undefined;
@@ -310,6 +407,7 @@ export function GitGraphViewer({
             : context
               ? (layout.nodes.find((n) => n.sha.startsWith(context))?.sha ?? null)
               : null,
+        true,
       );
       setFocusBranch(
         saved.branch && layout.branches.some((b) => b.name === saved.branch) ? saved.branch : null,
@@ -335,7 +433,16 @@ export function GitGraphViewer({
     contextNavigated.current = false;
     metricsRef.current = metrics;
     rememberAnchor();
-  }, [layout, metrics, sourceKey, rememberAnchor, contextKey, hasContext, setSelectedSha]);
+  }, [
+    layout,
+    metrics,
+    sourceKey,
+    rememberAnchor,
+    contextKey,
+    hasContext,
+    setSelectedSha,
+    viewerStateKey,
+  ]);
 
   useEffect(() => {
     if (!layout || selection.scope !== diagnosticsScope) return;
@@ -344,6 +451,7 @@ export function GitGraphViewer({
         `agg:focus:${identity}`,
         JSON.stringify({
           contextKey,
+          viewerStateKey,
           selected: selectedSha,
           branch: focusBranch,
           query,
@@ -357,6 +465,7 @@ export function GitGraphViewer({
   }, [
     identity,
     contextKey,
+    viewerStateKey,
     layout,
     selectedSha,
     focusBranch,
@@ -697,6 +806,8 @@ export function GitGraphViewer({
           adapter={diagnostics}
           layout={layout}
           selectedSha={selectedSha}
+          inspection={inspection}
+          onInspectionChange={onInspectionChange}
           selectionRevision={selectionRevision}
           sourceKey={sourceKey ?? title}
           locale={loc}

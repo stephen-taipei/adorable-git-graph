@@ -18,7 +18,7 @@ export function Overlay({
   onClose: () => void;
   epoch?: number;
 }) {
-  const { state, refresh, diagnostics } = useGraph(repo, epoch);
+  const { state, refresh, diagnostics, diagnosticGeneration } = useGraph(repo, epoch);
   const panelRef = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
 
@@ -110,6 +110,18 @@ export function Overlay({
             state={state}
             diagnostics={diagnostics}
             sourceKey={`github:${repo.owner}/${repo.repo}`}
+            viewerStateKey={
+              diagnosticGeneration
+                ? JSON.stringify([
+                    repo.owner.toLowerCase(),
+                    repo.repo.toLowerCase(),
+                    repo.branchHint ?? '',
+                    repo.commit ?? '',
+                    repo.pullRequest ?? null,
+                    diagnosticGeneration,
+                  ])
+                : undefined
+            }
             theme={githubTheme()}
             onRefresh={refresh}
             onClose={onClose}

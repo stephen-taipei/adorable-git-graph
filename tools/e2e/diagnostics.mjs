@@ -93,12 +93,14 @@ const assertGraphPaint = async (label) => {
       if (!viewport || !r.querySelector('.agg-canvas canvas')) return null;
       const row = [...r.querySelectorAll('.agg-commit')].find((el) => {
         const b = el.getBoundingClientRect();
-        return b.top >= viewport.top && b.bottom <= viewport.bottom;
+        return Math.min(b.bottom, viewport.bottom) - Math.max(b.top, viewport.top) >= 24;
       });
       const bounds = row?.getBoundingClientRect();
       const cell = row?.querySelector('.agg-c-g')?.getBoundingClientRect();
-      return cell && bounds && cell.width > 8 && bounds.height > 20
-        ? { x: cell.left + 2, y: bounds.top + 8, width: cell.width - 4, height: bounds.height - 16 }
+      const top = bounds ? Math.max(bounds.top, viewport.top) : 0;
+      const bottom = bounds ? Math.min(bounds.bottom, viewport.bottom) : 0;
+      return cell && bounds && cell.width > 8 && bottom - top >= 24
+        ? { x: cell.left + 2, y: top + 8, width: cell.width - 4, height: bottom - top - 16 }
         : null;
     });
     if (!clip) return false;
@@ -291,6 +293,17 @@ try {
     return true;
   }, OUTSIDE_SHA);
   assert(outsideButton, 'outside graph commit remains inspectable');
+  assert.equal(
+    await ui(
+      (r, expected) =>
+        [...r.querySelectorAll('.agg-diag-commits li')]
+          .find((row) => row.querySelector('button')?.textContent.includes(expected))
+          ?.querySelector('a')?.href,
+      OUTSIDE_SHA,
+    ),
+    `https://github.com/fork/adorable-git-graph/commit/${OUTSIDE_SHA}`,
+    'outside PR commit evidence link uses the fork repository',
+  );
   await wait(
     () =>
       ui((r, sha) => {
@@ -301,6 +314,34 @@ try {
       }, OUTSIDE_SHA),
     'outside graph changes',
   );
+  if (mode !== 'local') {
+    const forkCommitPath = `/repos/fork/adorable-git-graph/commits/${OUTSIDE_SHA}`;
+    assert(
+      seen.paths.some((p) => p.includes(forkCommitPath)),
+      'outside PR commit uses its fork repository',
+    );
+    const from = seen.paths.length;
+    await click('.agg-actions .agg-btn--danger');
+    await wait(() => ui((r) => Boolean(r.querySelector('.agg-fab'))), 'outside inspection closed');
+    await click('.agg-fab');
+    await wait(
+      () =>
+        ui(
+          (r, expected) =>
+            [...r.querySelectorAll('.agg-diag-section')].some(
+              (s) => s.querySelector('select') && s.textContent.includes(expected),
+            ),
+          OUTSIDE_SHA,
+        ),
+      'outside fork inspection restored without Home',
+    );
+    assert(
+      !seen.paths
+        .slice(from)
+        .some((p) => p.includes(`/repos/demo/adorable-git-graph/commits/${OUTSIDE_SHA}`)),
+      'restored outside inspection keeps the fork owner',
+    );
+  }
   await ui((r) => r.querySelector('.agg-root').focus());
   await page.keyboard.press('Home');
   await wait(

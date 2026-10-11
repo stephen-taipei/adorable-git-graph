@@ -16,7 +16,12 @@ type Fetched =
 export function useGraph(
   repo: RepoRef,
   epoch = 0,
-): { state: ViewerState; refresh: () => void; diagnostics: DiagnosticAdapter } {
+): {
+  state: ViewerState;
+  refresh: () => void;
+  diagnostics: DiagnosticAdapter;
+  diagnosticGeneration?: string;
+} {
   const [fetched, setFetched] = useState<Fetched>({ kind: 'loading' });
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -115,5 +120,5 @@ export function useGraph(
     setNonce((n) => n + 1);
   }, []);
 
-  return { state, refresh, diagnostics };
+  return { state, refresh, diagnostics, diagnosticGeneration: generation };
 }

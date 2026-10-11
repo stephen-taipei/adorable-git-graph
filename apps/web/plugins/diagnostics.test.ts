@@ -71,6 +71,225 @@ const state = (d: string) => {
 };
 
 describe('read-only local source diagnostics', () => {
+  it('limits file/directory replacement patches and byte coverage to the selected file', async () => {
+    const d = repo();
+    put(d, 'pkg', 'selected old file\n');
+    const base = commit(d, 'file');
+    rmSync(join(d, 'pkg'));
+    put(d, 'pkg/child.txt', 'unrelated child\n'.repeat(50_000));
+    const head = commit(d, 'directory');
+    const expectedRemoved = runDiagnosticGit(d, [
+      'diff',
+      '-p',
+      '--diff-filter=D',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      base,
+      head,
+      '--',
+      'pkg',
+    ]);
+    const expectedAdded = runDiagnosticGit(d, [
+      'diff',
+      '-p',
+      '--diff-filter=A',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      head,
+      base,
+      '--',
+      'pkg',
+    ]);
+    const expected = await Promise.all([expectedRemoved, expectedAdded]);
+    const before = state(d);
+    for (const [from, to, text] of [
+      [base, head, expected[0]],
+      [head, base, expected[1]],
+    ]) {
+      const patch = await adapter(d).patch(from!, to!, 'pkg');
+      expect(patch.patch).toBe(text);
+      expect(patch.patch).not.toContain('pkg/child.txt');
+      expect(patch.coverage.status).toBe('complete');
+      expect(patch.coverage.loaded).toBe(Buffer.byteLength(text!));
+      expect(patch.coverage.total).toBe(Buffer.byteLength(text!));
+    }
+    expect(state(d)).toBe(before);
+  });
+
+  it('isolates a rename from unrelated descendant renames', async () => {
+    const d = repo(),
+      isolated = repo();
+    for (const cwd of [d, isolated]) put(cwd, 'from', 'selected rename\n');
+    put(d, 'to/child.txt', 'unrelated rename\n');
+    const base = commit(d, 'base'),
+      isolatedBase = commit(isolated, 'base');
+    rmSync(join(d, 'from'));
+    rmSync(join(d, 'to'), { recursive: true });
+    put(d, 'to', 'selected rename\n');
+    put(d, 'from/child.txt', 'unrelated rename\n');
+    rmSync(join(isolated, 'from'));
+    put(isolated, 'to', 'selected rename\n');
+    const head = commit(d, 'renames'),
+      isolatedHead = commit(isolated, 'rename');
+    const expected = await runDiagnosticGit(isolated, [
+      'diff',
+      '-p',
+      '--find-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      isolatedBase,
+      isolatedHead,
+      '--',
+      'from',
+      'to',
+    ]);
+    const before = state(d);
+    const patch = await adapter(d).patch(base, head, 'to', 'from');
+    expect(patch.patch).toBe(expected);
+    expect(patch.patch).not.toContain('child.txt');
+    expect(patch.coverage.total).toBe(Buffer.byteLength(expected));
+    expect(state(d)).toBe(before);
+  });
+
+  it.each([
+    'space name.txt',
+    'tab\tname.txt',
+    'new\nline.txt',
+    'quote"name.txt',
+    '中文.txt',
+    ':(glob)*.txt',
+  ])('uses a checked legacy fallback for the exact literal leaf %j', async (path) => {
+    const d = repo();
+    put(d, path, 'one\n');
+    const base = commit(d, 'base');
+    put(d, path, 'two\n');
+    const head = commit(d, 'head');
+    const calls: string[][] = [];
+    const legacy = createLocalDiagnostics(d, async (args, signal) => {
+      calls.push([...args]);
+      if (args.includes('--max-depth=0')) throw Object.assign(new Error('old Git'), { code: 129 });
+      return runDiagnosticGit(d, args, signal);
+    });
+    const expected = await runDiagnosticGit(d, [
+      'diff',
+      '-p',
+      '--no-color',
+      base,
+      head,
+      '--',
+      path,
+    ]);
+    const before = state(d);
+    const result = await legacy.patch(base, head, path);
+    expect(result.patch).toBe(expected);
+    expect(result.coverage.status).toBe('complete');
+    expect(calls.filter((a) => a[0] === 'ls-tree')).toHaveLength(2);
+    expect(state(d)).toBe(before);
+  });
+
+  it('keeps legacy root, rename, mode and missing-child gitlink patches readable', async () => {
+    const d = repo();
+    put(d, 'before', 'rename content\n');
+    const base = commit(d, 'root');
+    const legacy = createLocalDiagnostics(d, async (args, signal) => {
+      if (args.includes('--max-depth=0')) throw new Error('depth flag unavailable');
+      return runDiagnosticGit(d, args, signal);
+    });
+    expect((await legacy.patch(null, base, 'before')).coverage.status).toBe('complete');
+    rmSync(join(d, 'before'));
+    put(d, 'after', 'rename content\n');
+    const renamed = commit(d, 'rename');
+    expect((await legacy.patch(base, renamed, 'after', 'before')).patch).toContain(
+      'rename to after',
+    );
+    chmodSync(join(d, 'after'), 0o755);
+    const mode = commit(d, 'mode');
+    expect((await legacy.patch(renamed, mode, 'after')).patch).toContain('new mode 100755');
+    const sub = repo();
+    git(sub, 'update-index', '--add', '--cacheinfo', '160000', '4'.repeat(40), 'vendor/mod');
+    git(sub, 'commit', '-q', '-m', 'root gitlink');
+    const subHead = git(sub, 'rev-parse', 'HEAD');
+    const subLegacy = createLocalDiagnostics(sub, async (args, signal) => {
+      if (args.includes('--max-depth=0')) throw new Error('depth flag unavailable');
+      return runDiagnosticGit(sub, args, signal);
+    });
+    const before = state(sub);
+    expect((await subLegacy.patch(null, subHead, 'vendor/mod')).patch).toContain(
+      'Subproject commit',
+    );
+    expect(state(sub)).toBe(before);
+  });
+
+  it('refuses legacy recursion when an endpoint contains a tree at the selected path', async () => {
+    const d = repo();
+    put(d, 'pkg', 'file\n');
+    const base = commit(d, 'file');
+    rmSync(join(d, 'pkg'));
+    put(d, 'pkg/child', 'child\n');
+    const head = commit(d, 'directory');
+    const calls: string[][] = [];
+    const legacy = createLocalDiagnostics(d, async (args, signal) => {
+      calls.push([...args]);
+      if (args.includes('--max-depth=0')) throw new Error('old Git');
+      return runDiagnosticGit(d, args, signal);
+    });
+    const result = await legacy.patch(base, head, 'pkg');
+    expect(result.coverage.status).toBe('unavailable');
+    expect(result.error).toBe('exact_patch_unavailable');
+    expect(
+      calls.some((a) => a[0] === 'diff' && a.includes('-p') && !a.includes('--max-depth=0')),
+    ).toBe(false);
+  });
+
+  it.each(['unterminated', 'wrong-path', 'extra-field', 'multiple-records'])(
+    'rejects malformed legacy leaf proof: %s',
+    async (kind) => {
+      const d = repo();
+      put(d, 'leaf', 'one\n');
+      const base = commit(d, 'base');
+      put(d, 'leaf', 'two\n');
+      const head = commit(d, 'head');
+      const object = git(d, 'rev-parse', `${head}:leaf`);
+      const valid = `100644 blob ${object}\tleaf\0`;
+      const bad =
+        kind === 'unterminated'
+          ? valid.slice(0, -1)
+          : kind === 'wrong-path'
+            ? valid.replace('\tleaf', '\tother')
+            : kind === 'extra-field'
+              ? valid.replace('\t', ' extra\t')
+              : valid + valid;
+      const calls: string[][] = [];
+      const legacy = createLocalDiagnostics(d, async (args, signal) => {
+        calls.push([...args]);
+        if (args.includes('--max-depth=0')) throw new Error('old Git');
+        if (args[0] === 'ls-tree') return bad;
+        return runDiagnosticGit(d, args, signal);
+      });
+      expect((await legacy.patch(base, head, 'leaf')).error).toBe('exact_patch_unavailable');
+      expect(calls.some((a) => a.includes('-p') && !a.includes('--max-depth=0'))).toBe(false);
+    },
+  );
+
+  it('propagates cancellation before attempting a legacy exact-path proof', async () => {
+    const d = repo();
+    put(d, 'leaf', 'one\n');
+    const base = commit(d, 'base');
+    put(d, 'leaf', 'two\n');
+    const head = commit(d, 'head');
+    const calls: string[][] = [];
+    const local = createLocalDiagnostics(d, async (args, signal) => {
+      calls.push([...args]);
+      if (args.includes('--max-depth=0')) throw new DOMException('cancelled', 'AbortError');
+      return runDiagnosticGit(d, args, signal);
+    });
+    await expect(local.patch(base, head, 'leaf')).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls.some((a) => a[0] === 'ls-tree')).toBe(false);
+  });
+
   it('reports fixed-SHA gitlinks even when repository settings ignore submodules', async () => {
     const child = repo();
     put(child, 'child.txt', 'one\n');

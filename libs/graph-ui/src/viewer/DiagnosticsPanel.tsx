@@ -96,6 +96,10 @@ const reasonLabels: Record<string, [string, string]> = {
   file_limit: ['檔案清單達上限', 'File limit'],
   patch_limit: ['Patch 已截斷', 'Patch truncated'],
   patch_truncated: ['Patch 已截斷', 'Patch truncated'],
+  exact_patch_unavailable: [
+    '此 Git 環境無法確認單檔 diff 的範圍',
+    'This Git environment cannot guarantee exact single-file diff scope',
+  ],
   statistics_unavailable: ['部分統計無法取得', 'Statistics unavailable'],
   missing_objects: ['缺少 Git 物件', 'Missing Git objects'],
   refs_unavailable: ['Ref 無法解析', 'Refs unavailable'],
@@ -156,6 +160,10 @@ export function CoverageNotice({ layout, locale }: { layout: GraphLayout; locale
   );
 }
 type Kind = 'compare' | 'changes' | 'patch' | 'pr';
+export interface CommitInspection {
+  sha: string;
+  repo?: string;
+}
 export interface DiagnosticsPanelProps {
   scope: object;
   open: boolean;
@@ -163,6 +171,8 @@ export interface DiagnosticsPanelProps {
   layout: GraphLayout;
   selectedSha?: string | null;
   selectionRevision?: number;
+  inspection?: CommitInspection;
+  onInspectionChange: (inspection?: CommitInspection) => void;
   sourceKey: string;
   locale: Locale;
   onGoto: (sha: string) => void;
@@ -183,7 +193,8 @@ function ScopedDiagnosticsPanel({
   adapter,
   layout,
   selectedSha,
-  selectionRevision,
+  inspection,
+  onInspectionChange,
   sourceKey,
   locale,
   onGoto,
@@ -204,8 +215,6 @@ function ScopedDiagnosticsPanel({
   };
   const [inputs, setInputs] = useState(defaults);
   const [pins, setPins] = useState<{ base?: PinnedRef; head?: PinnedRef }>({});
-  const [inspection, setInspection] = useState<{ sha: string; repo?: string }>();
-  useEffect(() => setInspection(undefined), [selectedSha, selectionRevision]);
   const [comparison, setComparison] = useState<ComparisonResult>();
   const [changes, setChanges] = useState<CommitChangesResult>();
   const [parent, setParent] = useState<{ sha: string; value: string }>();
@@ -393,16 +402,23 @@ function ScopedDiagnosticsPanel({
             disabled={!isFullSha(c.sha)}
             onClick={() => {
               if (layout.nodes.some((n) => n.sha === c.sha)) {
-                setInspection(undefined);
                 onGoto(c.sha);
-              } else setInspection({ sha: c.sha, repo: commitRepo });
+              } else onInspectionChange({ sha: c.sha, repo: commitRepo });
             }}
           >
             <code>{c.sha}</code>
           </button>{' '}
           {c.subject}
           {layout.repo.url?.startsWith('https://github.com/') && (
-            <a href={`${layout.repo.url}/commit/${c.sha}`} target="_blank" rel="noreferrer">
+            <a
+              href={
+                commitRepo && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(commitRepo)
+                  ? `https://github.com/${commitRepo}/commit/${c.sha}`
+                  : `${layout.repo.url}/commit/${c.sha}`
+              }
+              target="_blank"
+              rel="noreferrer"
+            >
               {' '}
               ↗
             </a>

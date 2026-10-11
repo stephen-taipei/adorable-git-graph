@@ -380,7 +380,46 @@ export function createLocalDiagnostics(repoDir: string, runGit: RunGit): Diagnos
                 '--',
                 ...paths,
               ];
-        const patch = await runGit(args, signal);
+        let patch: string;
+        try {
+          // Literal pathspecs still include descendants when a file is replaced
+          // by a directory. Depth zero keeps the selected file/rename pair exact.
+          patch = await runGit([args[0]!, '--max-depth=0', ...args.slice(1)], signal);
+        } catch (error) {
+          if (aborted(error)) throw error;
+          // Older Git can safely use the original query only if every requested
+          // path is an exact leaf (or absent) in both pinned trees. Reading tree
+          // entries also works for gitlinks whose child commit is not present.
+          for (const revision of base === null ? [head] : [base, head]) {
+            for (const literal of paths) {
+              const entries = await runGit(
+                ['ls-tree', '--full-tree', '-z', revision, '--', literal],
+                signal,
+              );
+              if (!entries) continue;
+              if (!entries.endsWith('\0')) return fail('exact_patch_unavailable', f.binary);
+              const records = entries.slice(0, -1).split('\0');
+              if (records.length !== 1) return fail('exact_patch_unavailable', f.binary);
+              const record = records[0]!;
+              const separator = record.indexOf('\t');
+              const metadata = record.slice(0, separator).split(' ');
+              const [mode, type, object] = metadata;
+              if (
+                separator < 0 ||
+                metadata.length !== 3 ||
+                record.slice(separator + 1) !== literal ||
+                !object ||
+                !isFullSha(object) ||
+                !(
+                  (['100644', '100755', '120000'].includes(mode!) && type === 'blob') ||
+                  (mode === '160000' && type === 'commit')
+                )
+              )
+                return fail('exact_patch_unavailable', f.binary);
+            }
+          }
+          patch = await runGit(args, signal);
+        }
         if (!patch) return fail('patch_unavailable', f.binary);
         const bytes = Buffer.from(patch, 'utf8');
         return {
