@@ -14,6 +14,7 @@ import { inkRatio } from './pixels.mjs';
 import { cleanupViewerScope, prepareViewerScope, verifyViewerScope } from './viewer-scope.mjs';
 import { buildLanBundle, verifyCrossTabAuth, verifyLanHttp } from './app-auth-isolation.mjs';
 import { verifyFirefoxApp } from './app-auth-firefox.mjs';
+import { verifyFirefoxCleanup } from './app-auth-firefox-cleanup.mjs';
 import {
   cleanupWebSourceIdentity,
   prepareWebSourceIdentity,
@@ -658,6 +659,12 @@ try {
       // The web App P1 regressions in Firefox, before the extension flow.
       const fx = await import('../../apps/extension-firefox/e2e/firefox.mjs');
       xvfb = await fx.startXvfb();
+      await verifyFirefoxCleanup({
+        root,
+        firefox: fx.findFirefox(),
+        display: xvfb.display,
+        artifacts,
+      });
       fixture();
       lanBundle = mkdtempSync(resolve(tmpdir(), 'agg-lan-bundle-'));
       await verifyFirefoxApp({

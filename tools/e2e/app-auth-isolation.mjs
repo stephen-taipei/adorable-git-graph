@@ -235,7 +235,7 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
       if (answer.kind === 'detail' && hold.scopes.has(`${tab}:${scope}`)) held.push(fulfill);
       else await fulfill();
     });
-    const open = async (name, { missStorageEvents = false } = {}) => {
+    const open = async (name, { missStorageEvents = false, delayStorageEvents = false } = {}) => {
       const page = await ctx.newPage();
       names.set(page, name);
       page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
@@ -245,6 +245,29 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
         await page.addInitScript(() =>
           window.addEventListener('storage', (e) => e.stopImmediatePropagation(), true),
         );
+      // Models a tab whose storage handler has not run yet: events are held
+      // and redelivered to the App's own listener on release.
+      if (delayStorageEvents)
+        await page.addInitScript(() => {
+          const held = [];
+          window.addEventListener(
+            'storage',
+            (e) => {
+              if (e.__aggReleased) return;
+              e.stopImmediatePropagation();
+              held.push({ key: e.key, oldValue: e.oldValue, newValue: e.newValue, url: e.url });
+            },
+            true,
+          );
+          window.__aggHeldStorage = () => held.length;
+          window.__aggReleaseStorage = () => {
+            for (const init of held.splice(0)) {
+              const event = new StorageEvent('storage', { ...init, storageArea: localStorage });
+              event.__aggReleased = true;
+              window.dispatchEvent(event);
+            }
+          };
+        });
       await page.goto(url);
       return page;
     };
@@ -503,6 +526,54 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
       const open = await t.assertAdopted(a, label, scope, from);
       await a.reload();
       const reload = await t.assertNoRestore(a, `${label} then reload`, from);
+      return { open, reload };
+    });
+
+  // A submits a settings draft before it has processed the other tab's change
+  // (storage event not yet delivered or missed). The write must be refused.
+  for (const [label, act, expected] of [
+    ['A submits a stale draft after B changed the credential', 'save', tokens.b],
+    ['A submits a stale draft after B cleared the credential', 'clear', null],
+  ])
+    await scenario(label, async (t) => {
+      const { a, kitA, kitB } = await t.setup({ delayStorageEvents: true });
+      await a.locator('.agg-actions button').last().click();
+      await a.locator('.web-dialog input').waitFor();
+      await t.resetFrames(a);
+      const from = t.calls.length;
+      if (act === 'save') await kitB.save(tokens.b);
+      else await kitB.clear();
+      await kitB.closed();
+      // B's change reached A's storage, but A's handler has not run: A still
+      // has credential A adopted and its dialog draft is credential A.
+      await wait(() => a.evaluate(() => window.__aggHeldStorage() > 0), `${label}: event held`);
+      assert.equal(await a.locator('.web-dialog').count(), 1, `${label}: A dialog still open`);
+      await a.locator('.web-dialog button[type="submit"]').click();
+      await kitA.alert();
+      assert.equal((await sharedState(a)).token, expected, `${label}: other tab's change kept`);
+      assert.equal(
+        await a.locator('.web-dialog input').inputValue(),
+        expected ?? '',
+        `${label}: refused draft replaced by the current value`,
+      );
+      const scope = expected ? 'b' : 'anonymous';
+      const open = await t.assertAdopted(a, label, scope, from);
+      // The delayed handler finally runs; nothing changes back.
+      const adoptedState = { shared: await sharedState(a), tab: await tabState(a) };
+      await a.evaluate(() => window.__aggReleaseStorage());
+      await sleep(300);
+      assert.deepEqual(
+        { shared: await sharedState(a), tab: await tabState(a) },
+        adoptedState,
+        `${label}: late handler is a no-op`,
+      );
+      assert(
+        !t.calls.slice(from).some((c) => c.tab === 'A' && c.scope === 'a' && c.kind === 'graph'),
+        `${label}: A never queries with the stale credential again`,
+      );
+      await a.reload();
+      const reload = await t.assertNoRestore(a, `${label} then reload`, from);
+      assert.equal((await sharedState(a)).token, expected, `${label}: still kept after reload`);
       return { open, reload };
     });
 

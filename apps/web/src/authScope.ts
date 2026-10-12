@@ -153,16 +153,35 @@ export function syncAuth(current: Auth, stores: AuthStores = browserStores): Aut
 
 /**
  * Saves (or clears, for '') the credential. Returns null when the verified
- * stored credential already is `next`. Rotates the tab scope first, then the
+ * stored credential already is `next`; throws AuthConflict, writing nothing,
+ * when the shared credential no longer matches the one this tab adopted. Rotates the tab scope first, then the
  * shared generation, then the credential, and verifies all of them; throws on
  * any failure, leaving the caller to fail closed.
  */
+/** Another tab changed the credential after this tab's draft was based on it. */
+export class AuthConflict extends Error {
+  constructor() {
+    super('Credential changed in another tab');
+    this.name = 'AuthConflict';
+  }
+}
+
 export function saveCredential(
   current: Auth,
   next: string,
   stores: AuthStores = browserStores,
 ): Auth | null {
   const shared = readShared(stores);
+  // The draft is based on the credential this tab adopted. If another tab has
+  // changed or cleared it since (and this tab has not processed that yet),
+  // writing would silently undo the change or restore a cleared credential.
+  // A tab whose credential was unreadable shows no baseline; its explicit
+  // retry after the visible error proceeds.
+  if (
+    current.tokenReadable &&
+    (shared.token !== current.token || shared.generation !== current.generation)
+  )
+    throw new AuthConflict();
   if (
     current.tokenReadable &&
     next === current.token &&

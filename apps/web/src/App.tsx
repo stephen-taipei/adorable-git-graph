@@ -9,6 +9,7 @@ import { locale, t } from './i18n';
 import { clearGitHubCache, useGraphSource } from './useGraphSource';
 import { DEFAULT_REPO } from './protocol';
 import {
+  AuthConflict,
   GENERATION_KEY,
   TOKEN_KEY,
   ephemeralScope,
@@ -44,6 +45,8 @@ export function App() {
   const [auth, setAuth] = useState(initialAuth);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  // Remounts the dialog so a refused stale draft is replaced by the current value.
+  const [dialogRevision, setDialogRevision] = useState(0);
   const { token } = auth;
   const authRef = useRef(auth);
   authRef.current = auth;
@@ -135,6 +138,7 @@ export function App() {
       />
       {tokenOpen && (
         <TokenDialog
+          key={dialogRevision}
           token={token}
           error={tokenError}
           onClose={() => setTokenOpen(false)}
@@ -150,7 +154,26 @@ export function App() {
                 setAuth(saved);
               }
               setTokenError(null);
-            } catch {
+            } catch (error) {
+              if (error instanceof AuthConflict) {
+                // Nothing was written. Adopt the other tab's credential (as a
+                // storage event would) and let the user decide again.
+                const current = authRef.current;
+                const adopted = syncAuth(current);
+                if (adopted !== current) {
+                  authRef.current = adopted;
+                  forgetScope(current.nonce);
+                  clearGitHubCache();
+                  setAuth(adopted);
+                }
+                setDialogRevision((n) => n + 1);
+                setTokenError(
+                  locale === 'zh-TW'
+                    ? '另一個分頁已變更 GitHub token，這次未儲存。已載入目前設定，請確認後再試。'
+                    : 'GitHub token was changed in another tab, so nothing was saved. The current settings are loaded; review them and retry.',
+                );
+                return;
+              }
               // A partial write may have persisted the new token. An unused,
               // ephemeral scope makes both same-page and reload restoration
               // fail closed without committing an uncertain auth change.

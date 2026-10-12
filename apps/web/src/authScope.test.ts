@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  AuthConflict,
   GENERATION_KEY,
   forgetScope,
   SCOPE_KEY,
@@ -222,6 +223,37 @@ describe('saveCredential', () => {
       generation: saved.generation,
     });
     expect(local.data.get(GENERATION_KEY)).toBe(saved.generation);
+  });
+
+  it.each([
+    ['changed', 'token-b'],
+    ['cleared', ''],
+  ])('refuses a draft after another tab %s the credential, writing nothing', (_, other) => {
+    const { local, tab } = origin();
+    local.data.set(TOKEN_KEY, 'token-a');
+    const a = tab(),
+      b = tab();
+    const stale = initialAuth(a);
+    const saved = saveCredential(initialAuth(b), other, b)!;
+    const before = [...local.data.entries()];
+    const scope = a.session().data.get(SCOPE_KEY);
+    // Tab A has not processed the change and saves its draft of credential A.
+    expect(() => saveCredential(stale, 'token-a', a)).toThrow(AuthConflict);
+    expect(() => saveCredential(stale, 'token-c', a)).toThrow(AuthConflict);
+    expect([...local.data.entries()]).toEqual(before);
+    expect(a.session().data.get(SCOPE_KEY)).toBe(scope);
+    expect(local.data.get(GENERATION_KEY)).toBe(saved.generation);
+    // After adopting the shared credential, an explicit save proceeds.
+    expect(saveCredential(syncAuth(stale, a), 'token-c', a)?.token).toBe('token-c');
+  });
+
+  it('lets an explicit retry proceed when the credential was unreadable', () => {
+    const { local, tab } = origin();
+    local.data.set(TOKEN_KEY, 'token-a');
+    const a = tab();
+    const unreadable = { token: '', generation: null, nonce: opaqueId(), tokenReadable: false };
+    expect(saveCredential(unreadable, '', a)?.token).toBe('');
+    expect(local.data.has(TOKEN_KEY)).toBe(false);
   });
 
   it('writes nothing when the credential cannot be read first', () => {

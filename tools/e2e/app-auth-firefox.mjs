@@ -5,14 +5,30 @@
 // host goes to a dead proxy. Credentials and GitHub data are synthetic.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { basename, extname, resolve, sep } from 'node:path';
 import { TYPES, buildLanBundle, githubBody, scopeOf, sleep, wait } from './app-auth-isolation.mjs';
 
 const HOST = 'lan.rd.fixture.test';
 
-export async function verifyFirefoxApp({ root, repoDir, outDir, artifacts, firefox, display }) {
+/**
+ * `faults` lets the cleanup regression fail each stage on purpose: `build`
+ * replaces the bundle build, `firefox` the executable, `verify` fails after
+ * the App has loaded, `cleanup` fails the first cleanup step. `onResources`
+ * reports what the helper owns so the caller can check it was released.
+ */
+export async function verifyFirefoxApp({
+  root,
+  repoDir,
+  outDir,
+  artifacts,
+  firefox,
+  display,
+  faults = {},
+  onResources,
+}) {
   const shas = { selected: '7'.repeat(40), context: '8'.repeat(40) };
   const tokens = { a: 'fixture-ff-auth-a', b: 'fixture-ff-auth-b' };
   // Each tab views its own repo, so every API request names its tab.
@@ -66,34 +82,8 @@ export async function verifyFirefoxApp({ root, repoDir, outDir, artifacts, firef
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
     res.end(readFileSync(file));
   });
-  server.listen(0, '127.0.0.1');
-  await new Promise((r) => server.once('listening', r));
-  const port = server.address().port;
-  const origin = `http://${HOST}:${port}`;
-  // The API base is the only setting that differs from the shipped build; the
-  // Chromium check keeps the shipped default and intercepts api.github.com.
-  // Non-loopback plain-HTTP API bases are rejected by design.
-  buildLanBundle({ root, repoDir, outDir, apiBase: `http://127.0.0.1:${port}/gh` });
-  const puppeteer = createRequire(resolve(root, 'apps/extension-firefox/package.json'))(
-    'puppeteer-core',
-  );
-  const browser = await puppeteer.launch({
-    browser: 'firefox',
-    executablePath: firefox,
-    headless: true,
-    args: ['--no-remote', '--new-instance'],
-    env: { ...process.env, ...(display ? { DISPLAY: display } : {}) },
-    extraPrefsFirefox: {
-      'network.dns.localDomains': HOST,
-      'network.proxy.type': 1,
-      'network.proxy.http': '127.0.0.1',
-      'network.proxy.http_port': 9,
-      'network.proxy.ssl': '127.0.0.1',
-      'network.proxy.ssl_port': 9,
-      'network.proxy.no_proxies_on': HOST,
-      'intl.accept_languages': 'en-US',
-    },
-  });
+  // Owned resources, created inside the try below and released after it.
+  let browser, profile, pid, origin;
   const errors = [];
   const pages = [];
   const open = async () => {
@@ -171,7 +161,50 @@ export async function verifyFirefoxApp({ root, repoDir, outDir, artifacts, firef
     calls
       .slice(from)
       .filter((c) => c.tab === 'A' && c.kind === 'detail' && c.scope !== old && isOld(c));
+  let failure;
   try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const port = server.address().port;
+    origin = `http://${HOST}:${port}`;
+    onResources?.({ port });
+    // The API base is the only setting that differs from the shipped build; the
+    // Chromium check keeps the shipped default and intercepts api.github.com.
+    // Non-loopback plain-HTTP API bases are rejected by design.
+    (faults.build ?? buildLanBundle)({
+      root,
+      repoDir,
+      outDir,
+      apiBase: `http://127.0.0.1:${port}/gh`,
+    });
+    // A profile the helper owns, so it is removed whatever happens to Firefox.
+    profile = mkdtempSync(resolve(tmpdir(), 'agg-ff-app-profile-'));
+    onResources?.({ port, profile });
+    const puppeteer = createRequire(resolve(root, 'apps/extension-firefox/package.json'))(
+      'puppeteer-core',
+    );
+    browser = await puppeteer.launch({
+      browser: 'firefox',
+      executablePath: faults.firefox ?? firefox,
+      headless: true,
+      args: ['--no-remote', '--new-instance', '--profile', profile],
+      env: { ...process.env, ...(display ? { DISPLAY: display } : {}) },
+      extraPrefsFirefox: {
+        'network.dns.localDomains': HOST,
+        'network.proxy.type': 1,
+        'network.proxy.http': '127.0.0.1',
+        'network.proxy.http_port': 9,
+        'network.proxy.ssl': '127.0.0.1',
+        'network.proxy.ssl_port': 9,
+        'network.proxy.no_proxies_on': HOST,
+        'intl.accept_languages': 'en-US',
+      },
+    });
+    pid = browser.process()?.pid;
+    onResources?.({ port, profile, pid });
+
     // Non-secure context, actual App, default repo.
     const a = await open();
     const kitA = kit(a, repos.A);
@@ -187,6 +220,7 @@ export async function verifyFirefoxApp({ root, repoDir, outDir, artifacts, firef
       label: 'Firefox non-secure context renders the actual App and default repo',
       env,
     });
+    if (faults.verify) throw new Error('fixture: verification failed after launch');
 
     // Credential A, selection, same-credential reload restore.
     await a.goto(`${origin}/?repo=${repos.A}`);
@@ -260,29 +294,63 @@ export async function verifyFirefoxApp({ root, repoDir, outDir, artifacts, firef
       `PASS Firefox actual App: non-secure context and two-tab auth (${results.length} checks)`,
     );
   } catch (error) {
-    const state = await Promise.all(
-      pages.map((p) =>
-        p
-          .evaluate(() => ({
-            page: `${location.href} ${document.body.textContent.slice(0, 400)}`,
-            console: window.__aggConsoleErrors?.map((e) => e.slice(0, 1500)),
-          }))
-          .catch(() => null),
-      ),
-    );
-    writeFileSync(
-      resolve(artifacts, 'firefox-app-auth-failure.json'),
-      JSON.stringify(
-        { results, calls, errors, unexpected, state, error: String(error.message) },
-        null,
-        2,
-      ) + '\n',
-    );
-    throw error;
-  } finally {
-    for (const page of pages) await page.close().catch(() => {});
-    await browser.close().catch(() => {});
-    server.closeAllConnections();
-    await new Promise((r) => server.close(r));
+    failure = error;
+    if (artifacts) {
+      const state = await Promise.all(
+        pages.map((p) =>
+          p
+            .evaluate(() => ({
+              page: `${location.href} ${document.body.textContent.slice(0, 400)}`,
+              console: window.__aggConsoleErrors?.map((e) => e.slice(0, 1500)),
+            }))
+            .catch(() => null),
+        ),
+      );
+      writeFileSync(
+        resolve(artifacts, 'firefox-app-auth-failure.json'),
+        JSON.stringify(
+          { results, calls, errors, unexpected, state, error: String(error.message) },
+          null,
+          2,
+        ) + '\n',
+      );
+    }
   }
+  // Release every owned resource even when one step fails; the original
+  // failure stays the one reported.
+  const cleanupErrors = [];
+  const step = async (label, fn) => {
+    try {
+      await fn();
+    } catch (error) {
+      cleanupErrors.push(new Error(`${label}: ${error.message}`));
+    }
+  };
+  if (faults.cleanup)
+    await step('injected', () => {
+      throw new Error('fixture: cleanup step failed');
+    });
+  for (const page of pages) await step('page', () => page.close());
+  if (browser) await step('browser', () => browser.close());
+  if (pid)
+    await step('browser process', () => {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return;
+      }
+      process.kill(pid, 'SIGKILL');
+    });
+  if (profile) await step('profile', () => rmSync(profile, { recursive: true, force: true }));
+  if (server.listening)
+    await step('server', () => {
+      server.closeAllConnections();
+      return new Promise((done, fail) => server.close((e) => (e ? fail(e) : done())));
+    });
+  if (failure) {
+    if (cleanupErrors.length) failure.cleanupErrors = cleanupErrors;
+    throw failure;
+  }
+  if (cleanupErrors.length)
+    throw new AggregateError(cleanupErrors, 'Firefox helper cleanup failed');
 }
