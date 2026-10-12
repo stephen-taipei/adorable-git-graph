@@ -5,7 +5,7 @@
 ## 狀態
 
 - **兩項 P1 已修正，待獨立正式驗收。**
-- 最新受測候選版本為第二輪 **`b531ac8`**（見文末「第二輪」）。第一輪 `f20038e` 的結果保留在下方各節，不改寫。
+- 最新受測候選版本為 **`387a57e`**（第二輪 `b531ac8` 加上 PR review 的一項修正，見文末「第二輪之後」）。第二輪 `b531ac8` 的結果見「第二輪」。第一輪 `f20038e` 的結果保留在下方各節，不改寫。
 - 原始正式結果維持 **BLOCK**（`3eb1cb8`、Run `sbw-20261011T201955Z-a8a3cc81d327`、Package `review-5b6fe6a1273d586ad1e10f84bf7feec7`，見 [rd-open-p1.md](rd-open-p1.md)）。本頁是工程檢查，不是正式驗收，不解除 BLOCK／HOLD。
 - 原 campaign `campaign-41b66b43bd4f86a8fb0a6cac89a94aad` 維持 13／13。本次沒有修改舊 ledger、signed runtime、signer／allowlist，也沒有建立新的 run、package 或 campaign。
 
@@ -178,7 +178,16 @@ Ink ratio（desktop／mobile）：local 0.0308／0.1184、Chrome 0.0308／0.1184
 
 ### 正式驗收待辦（現行）
 
-1. 取得適用授權後，以 `b531ac8` 建立 fixed-SHA 綁定與 production 產物，保留本機既有治理證據。
+1. 取得適用授權後，以最新受測候選版本（目前 `387a57e`）建立 fixed-SHA 綁定與 production 產物，保留本機既有治理證據。
 2. 由授權方建立新的正式 review／治理額度（本次未建立 run、package 或 campaign），提供本頁與 [rd-open-p1.md](rd-open-p1.md) 給 reviewer。
 3. 視需要在 macOS、Chrome for Testing、本機 Firefox 補跑 `diagnostics.mjs local／chrome／firefox`。
 4. 取得獨立 review 與 host-signed receipt 後由 `sbw complete` 判定；在此之前維持 HOLD，原始 BLOCK 不改為 PASS。
+
+## 第二輪之後：`387a57e`
+
+受測 SHA：`387a57ebb4f24a388811b5649977860e7e5ec2bd`（parent `4add24c`）。來源：[PR #7](https://github.com/stephen-taipei/adorable-git-grpah/pull/7) 的 Codex review（P2）。
+
+- 問題：比較表單輸入大寫的完整 SHA 時，`isFullSha` 接受，但 GitHub 回傳小寫 canonical SHA，`libs/graph-core/src/github-diagnostics.ts` 以大小寫敏感比較而誤判「Pinned SHA mismatch」。此問題不屬於兩項 P1，但在同一個 PR 範圍內。
+- 修正：以小寫化的輸入比較；回傳不同 SHA 時仍拒絕。新增單元測試，修正前失敗（`Pinned SHA mismatch`）、修正後通過。
+- 結果（`387a57e`，`--skip-nx-cache`）：typecheck 通過；tests 273／273（graph-core 69、graph-ui 39、extension-core 47、web 118）；prettier 與 build 通過；`diagnostics.mjs local`、`chrome`、`firefox` 皆通過（兩分頁 9 情境、非 secure context 18 項、Firefox App 4 項）。GitHub CI `verify` 在 `4add24c` 通過。
+- 正式驗收待辦同「第二輪」，fixed-SHA 綁定改用 `387a57e`（或之後經同等檢查的 commit）。
