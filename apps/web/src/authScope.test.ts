@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   GENERATION_KEY,
+  forgetScope,
   SCOPE_KEY,
   TOKEN_KEY,
   initialAuth,
@@ -139,16 +140,9 @@ describe('initialAuth', () => {
 });
 
 describe('readShared', () => {
-  it('retries a read torn by a concurrent write and gives up if it keeps changing', () => {
+  it('throws when the credential cannot be read', () => {
     const { local, tab } = origin();
-    let writes = 1;
-    local.onGet = (key) => {
-      if (key === TOKEN_KEY && writes-- > 0) local.data.set(GENERATION_KEY, opaqueId());
-    };
-    expect(readShared(tab())).toEqual({ token: '', generation: local.data.get(GENERATION_KEY) });
-    local.onGet = (key) => {
-      if (key === TOKEN_KEY) local.data.set(GENERATION_KEY, opaqueId());
-    };
+    local.fail = (op, key) => op === 'get' && key === TOKEN_KEY;
     expect(() => readShared(tab())).toThrow();
   });
 });
@@ -172,6 +166,27 @@ describe('syncAuth', () => {
     expect(initialAuth(a).nonce).toBe(changed.nonce);
     local.data.set(GENERATION_KEY, opaqueId());
     expect(syncAuth(changed, a).nonce).not.toBe(changed.nonce);
+  });
+
+  it('adopts a save seen in two steps twice, without rewriting the shared generation', () => {
+    const { local, tab } = origin();
+    local.data.set(TOKEN_KEY, 'token-a');
+    const a = tab(),
+      b = tab();
+    const auth = initialAuth(a);
+    const saved = saveCredential(initialAuth(b), 'token-b', b)!;
+    // Tab A first sees only the new generation, then the credential.
+    local.data.set(TOKEN_KEY, 'token-a');
+    const half = syncAuth(auth, a);
+    expect(half).toMatchObject({ token: 'token-a', generation: saved.generation });
+    expect(half.nonce).not.toBe(auth.nonce);
+    local.data.set(TOKEN_KEY, 'token-b');
+    const full = syncAuth(half, a);
+    expect(full).toMatchObject({ token: 'token-b', generation: saved.generation });
+    expect(full.nonce).not.toBe(half.nonce);
+    expect(local.data.get(GENERATION_KEY)).toBe(saved.generation);
+    expect(initialAuth(a).nonce).toBe(full.nonce);
+    expect(initialAuth(b).nonce).toBe(saved.nonce);
   });
 
   it('never leaves a restorable scope when the new scope cannot be persisted', () => {
@@ -258,5 +273,23 @@ describe('saveCredential', () => {
       expect(value).not.toContain('secret-token');
       expect(value).not.toContain(hash);
     }
+  });
+});
+
+describe('forgetScope', () => {
+  it('drops only inspection metadata saved under the retired scope', () => {
+    const { tab } = origin();
+    const a = tab();
+    const old = initialAuth(a).nonce;
+    const keep = opaqueId();
+    const session = a.session();
+    session.data.set(`agg:inspection:${JSON.stringify(['local:x', null, null, old])}`, '{}');
+    session.data.set(`agg:inspection:${JSON.stringify(['local:x', null, null, keep])}`, '{}');
+    session.data.set('agg:focus:local:x|x', JSON.stringify({ viewerStateKey: old }));
+    forgetScope(old, a);
+    expect([...session.data.keys()].filter((k) => k.startsWith('agg:inspection:'))).toEqual([
+      `agg:inspection:${JSON.stringify(['local:x', null, null, keep])}`,
+    ]);
+    expect(session.data.has('agg:focus:local:x|x')).toBe(true);
   });
 });

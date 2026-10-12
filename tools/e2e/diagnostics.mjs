@@ -13,6 +13,7 @@ import { OUTSIDE_SHA, sha, seen, latency, startMock } from './mock-github-api.mj
 import { inkRatio } from './pixels.mjs';
 import { cleanupViewerScope, prepareViewerScope, verifyViewerScope } from './viewer-scope.mjs';
 import { buildLanBundle, verifyCrossTabAuth, verifyLanHttp } from './app-auth-isolation.mjs';
+import { verifyFirefoxApp } from './app-auth-firefox.mjs';
 import {
   cleanupWebSourceIdentity,
   prepareWebSourceIdentity,
@@ -42,7 +43,7 @@ const artifacts = resolve(
 );
 mkdirSync(artifacts, { recursive: true });
 const errors = [];
-let browser, server, fake, child, ctx, background, setToken, lanBundle;
+let browser, server, fake, child, ctx, background, setToken, lanBundle, xvfb;
 const token = 'fixture-diagnostic-token';
 const git = (...args) =>
   execFileSync('git', args, {
@@ -564,6 +565,16 @@ async function verifyAppScope(api) {
 try {
   server = await startMock();
   const api = `http://127.0.0.1:${server.address().port}`;
+  // Local queries and the production snapshot need safe Git reads; the
+  // product refuses older Git, so fail early and clearly.
+  if (mode !== 'chrome')
+    try {
+      execFileSync('git', ['--no-lazy-fetch', '--version'], { stdio: 'ignore' });
+    } catch {
+      throw new Error(
+        'Local diagnostics need Git with --no-lazy-fetch (2.44+); put a newer git first in PATH.',
+      );
+    }
   if (mode === 'local') {
     prepareWebSourceIdentity(root);
     prepareViewerScope(root);
@@ -643,6 +654,21 @@ try {
     });
     await page.goto(`http://localhost:4277/?repo=demo/adorable-git-graph&pull=7`);
   } else {
+    if (mode === 'firefox') {
+      // The web App P1 regressions in Firefox, before the extension flow.
+      const fx = await import('../../apps/extension-firefox/e2e/firefox.mjs');
+      xvfb = await fx.startXvfb();
+      fixture();
+      lanBundle = mkdtempSync(resolve(tmpdir(), 'agg-lan-bundle-'));
+      await verifyFirefoxApp({
+        root,
+        repoDir: owned,
+        outDir: resolve(lanBundle, 'dist'),
+        artifacts,
+        firefox: fx.findFirefox(),
+        display: xvfb.display,
+      });
+    }
     const extension = resolve(owned, 'extension');
     execFileSync(process.execPath, ['scripts/build.mjs'], {
       cwd: resolve(root, `apps/${mode === 'chrome' ? 'extension' : 'extension-firefox'}`),
@@ -686,7 +712,10 @@ try {
     } else {
       const fx = await import('../../apps/extension-firefox/e2e/firefox.mjs');
       const { GECKO_ID } = await import('../../libs/extension-core/scripts/manifest.mjs');
+      // Linux Firefox has no WebGL without a display; reuse DISPLAY if set.
+      xvfb ??= await fx.startXvfb();
       ({ browser } = await fx.launchFirefox({
+        display: xvfb.display,
         firefox: fx.findFirefox(),
         extDir: extension,
         geckoId: GECKO_ID,
@@ -1023,6 +1052,7 @@ try {
     await once(child, 'exit');
   }
   if (fake) await new Promise((r) => fake.close(r));
+  xvfb?.stop();
   if (server) {
     server.closeAllConnections();
     await new Promise((r) => server.close(r));

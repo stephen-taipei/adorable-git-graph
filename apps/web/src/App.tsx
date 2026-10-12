@@ -12,6 +12,7 @@ import {
   GENERATION_KEY,
   TOKEN_KEY,
   ephemeralScope,
+  forgetScope,
   initialAuth,
   saveCredential,
   syncAuth,
@@ -41,6 +42,8 @@ export function App() {
   if (source.kind === 'local') lastLocal.current = import.meta.env.DEV ? source : { kind: 'local' };
   const [theme, setTheme] = useStored('agg.theme', 'auto', isThemeSetting);
   const [auth, setAuth] = useState(initialAuth);
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const { token } = auth;
   const authRef = useRef(auth);
   authRef.current = auth;
@@ -49,10 +52,15 @@ export function App() {
   // render drops the old graph, selection and diagnostics with their requests.
   useEffect(() => {
     const sync = () => {
-      const next = syncAuth(authRef.current);
-      if (next === authRef.current) return;
+      const previous = authRef.current;
+      const next = syncAuth(previous);
+      if (next === previous) return;
       authRef.current = next;
+      forgetScope(previous.nonce);
       clearGitHubCache();
+      // An open dialog holds a draft of the previous credential; saving it
+      // would silently undo the other tab's change.
+      setTokenOpen(false);
       setAuth(next);
     };
     const onStorage = (e: StorageEvent) => {
@@ -75,8 +83,6 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
-  const [tokenOpen, setTokenOpen] = useState(false);
-  const [tokenError, setTokenError] = useState<string | null>(null);
   const { state, refresh, repoName, diagnostics } = useGraphSource(source, token);
   const sourceKey =
     source.kind === 'github'
@@ -135,8 +141,10 @@ export function App() {
           onSave={(next) => {
             try {
               // No token or fingerprint enters the viewer key or its metadata.
-              const saved = saveCredential(auth, next);
+              const current = authRef.current;
+              const saved = saveCredential(current, next);
               if (saved) {
+                forgetScope(current.nonce);
                 clearGitHubCache();
                 authRef.current = saved;
                 setAuth(saved);
@@ -146,7 +154,9 @@ export function App() {
               // A partial write may have persisted the new token. An unused,
               // ephemeral scope makes both same-page and reload restoration
               // fail closed without committing an uncertain auth change.
-              const failed = { ...auth, nonce: ephemeralScope(), tokenReadable: false };
+              const current = authRef.current;
+              forgetScope(current.nonce);
+              const failed = { ...current, nonce: ephemeralScope(), tokenReadable: false };
               authRef.current = failed;
               setAuth(failed);
               setTokenError(

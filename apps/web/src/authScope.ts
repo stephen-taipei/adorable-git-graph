@@ -46,18 +46,22 @@ export function opaqueId(): string {
   return Array.from(bytes, (n) => n.toString(16).padStart(2, '0')).join('');
 }
 
-/** Credential and generation from one consistent read; throws if unreadable or changing. */
+/**
+ * Credential and generation as this tab sees them now; throws if unreadable.
+ * Another tab's two writes can arrive here in separate tasks. Writers rotate
+ * the generation before the credential, so a tab may briefly see the new
+ * generation with the old credential (never the reverse), and it adopts again
+ * with a new scope when the credential follows.
+ */
 export function readShared(stores: AuthStores = browserStores): {
   token: string;
   generation: string;
 } {
   const local = stores.local();
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const before = local.getItem(GENERATION_KEY);
-    const token = local.getItem(TOKEN_KEY) ?? '';
-    if (local.getItem(GENERATION_KEY) === before) return { token, generation: before ?? '' };
-  }
-  throw new Error('Credential generation changed while reading');
+  return {
+    generation: local.getItem(GENERATION_KEY) ?? '',
+    token: local.getItem(TOKEN_KEY) ?? '',
+  };
 }
 
 function savedScope(session: Storage, generation: string): string | null {
@@ -175,4 +179,23 @@ export function saveCredential(
   if (local.getItem(TOKEN_KEY) !== (next || null) || local.getItem(GENERATION_KEY) !== generation)
     throw new Error('Settings not persisted');
   return { token: next, generation, nonce, tokenReadable: true };
+}
+
+/**
+ * Drops viewer metadata saved under a scope this tab will never use again.
+ * Viewer keys carry the scope as an opaque JSON string element.
+ */
+export function forgetScope(nonce: string, stores: AuthStores = browserStores): void {
+  try {
+    const session = stores.session();
+    const marker = JSON.stringify(nonce);
+    const retired: string[] = [];
+    for (let i = 0; i < session.length; i += 1) {
+      const key = session.key(i);
+      if (key?.startsWith('agg:inspection:') && key.includes(marker)) retired.push(key);
+    }
+    for (const key of retired) session.removeItem(key);
+  } catch {
+    /* metadata only; nothing restores under a retired scope anyway */
+  }
 }

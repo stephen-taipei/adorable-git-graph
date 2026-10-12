@@ -8,8 +8,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, resolve, sep } from 'node:path';
 
 const TOKEN_KEY = 'agg.github-token';
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const wait = async (fn, label, ms = 20_000) => {
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const wait = async (fn, label, ms = 20_000) => {
   const end = Date.now() + ms;
   while (!(await fn())) {
     if (Date.now() > end) throw new Error(`Timeout: ${label}`);
@@ -20,7 +20,7 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 // Synthetic GitHub REST answers. Patches name the credential scope that
 // fetched them, so a late or reused result is visible in committed frames.
-function githubBody(url, scope, shas) {
+export function githubBody(url, scope, shas) {
   const parts = url.pathname.split('/'),
     owner = parts[2];
   const commit = (sha) => ({
@@ -66,7 +66,7 @@ function githubBody(url, scope, shas) {
   };
 }
 
-function scopeOf(auth, tokens) {
+export function scopeOf(auth, tokens) {
   for (const [scope, value] of Object.entries(tokens)) if (auth === `Bearer ${value}`) return scope;
   return auth ? 'unexpected' : 'anonymous';
 }
@@ -175,6 +175,13 @@ async function assertNoCredentialMaterial(pages, tokens, label) {
   }
 }
 
+// Shared credential and generation as one tab reads them.
+const sharedState = (page) =>
+  page.evaluate(() => ({
+    token: localStorage.getItem('agg.github-token'),
+    generation: localStorage.getItem('agg:auth-generation:v1'),
+  }));
+
 // Tab-scoped auth and focus records, read without running App code.
 const tabState = (page) =>
   page.evaluate(() =>
@@ -228,10 +235,16 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
       if (answer.kind === 'detail' && hold.scopes.has(`${tab}:${scope}`)) held.push(fulfill);
       else await fulfill();
     });
-    const open = async (name) => {
+    const open = async (name, { missStorageEvents = false } = {}) => {
       const page = await ctx.newPage();
       names.set(page, name);
       page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
+      // Models a tab that misses storage events (frozen or discarded tabs):
+      // a capture listener registered first stops the App's own listener.
+      if (missStorageEvents)
+        await page.addInitScript(() =>
+          window.addEventListener('storage', (e) => e.stopImmediatePropagation(), true),
+        );
       await page.goto(url);
       return page;
     };
@@ -293,8 +306,8 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
       );
       return { readyFrames: all.length };
     };
-    const setup = async () => {
-      const a = await open('A');
+    const setup = async (options = {}) => {
+      const a = await open('A', options);
       const kitA = appKit(a, repo);
       await kitA.ready('A anonymous');
       await kitA.save(tokens.a);
@@ -373,7 +386,14 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
       const from = t.calls.length;
       await kitB.save(tokens.b);
       await kitB.closed();
+      const afterSave = { shared: await sharedState(b), tab: await tabState(b) };
       const open = await t.assertAdopted(a, 'change keep-open', 'b', from);
+      await sleep(300);
+      assert.deepEqual(
+        { shared: await sharedState(b), tab: await tabState(b) },
+        afterSave,
+        'adopting tab never rotates the saving tab again',
+      );
       for (const fulfill of t.held.splice(0)) await fulfill();
       await sleep(300);
       const all = await t.frames(a);
@@ -418,11 +438,16 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
 
   await scenario('B clears credential, A kept open, then A reloads', async (t) => {
     const { a, kitB } = await t.setup();
+    // A has the settings dialog open with the old credential as its draft.
+    await a.locator('.agg-actions button').last().click();
+    await a.locator('.web-dialog input').waitFor();
     await t.resetFrames(a);
     const from = t.calls.length;
     await kitB.clear();
     await kitB.closed();
     const open = await t.assertAdopted(a, 'clear keep-open', 'anonymous', from);
+    assert.equal(await a.locator('.web-dialog').count(), 0, 'stale settings draft closed');
+    assert.equal((await sharedState(a)).token, null, "the other tab's clear stays in effect");
     await a.reload();
     const reload = await t.assertNoRestore(a, 'clear keep-open then reload', from);
     return { open, reload };
@@ -450,6 +475,37 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
     return t.assertNoRestore(a, 'clear while away', from);
   });
 
+  for (const [label, act, scope, recheck] of [
+    ['B changes credential, A misses the event, A returns to foreground', 'save', 'b', 'visible'],
+    [
+      'B clears credential, A misses the event, A restored from bfcache',
+      'clear',
+      'anonymous',
+      'pageshow',
+    ],
+  ])
+    await scenario(label, async (t) => {
+      const { a, kitB } = await t.setup({ missStorageEvents: true });
+      await t.resetFrames(a);
+      const from = t.calls.length;
+      if (act === 'save') await kitB.save(tokens.b);
+      else await kitB.clear();
+      await kitB.closed();
+      await sleep(1500);
+      assert(
+        !t.calls.slice(from).some((c) => c.tab === 'A' && c.kind === 'graph'),
+        `${label}: A really missed the storage event`,
+      );
+      await a.evaluate((recheck) => {
+        if (recheck === 'visible') document.dispatchEvent(new Event('visibilitychange'));
+        else window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      }, recheck);
+      const open = await t.assertAdopted(a, label, scope, from);
+      await a.reload();
+      const reload = await t.assertNoRestore(a, `${label} then reload`, from);
+      return { open, reload };
+    });
+
   writeFileSync(
     resolve(artifacts, 'actual-app-cross-tab-results.json'),
     JSON.stringify({ results, syntheticCredentials: true, realApp: true, twoTabs: true }, null, 2) +
@@ -464,7 +520,7 @@ export async function verifyCrossTabAuth({ browser, api, origin, artifacts }) {
   console.log(`PASS actual App cross-tab auth isolation: ${results.length} two-tab scenarios`);
 }
 
-const TYPES = {
+export const TYPES = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.css': 'text/css',
@@ -476,13 +532,14 @@ const TYPES = {
 };
 
 /** Production bundle with the shipped defaults; no dev server or Git endpoint. */
-export function buildLanBundle({ root, repoDir, outDir }) {
+export function buildLanBundle({ root, repoDir, outDir, apiBase }) {
   const env = {
     ...process.env,
     AGG_REPO_DIR: repoDir,
     AGG_LOCAL_REPOS_FILE: resolve(outDir, '..', 'lan-state.json'),
   };
-  delete env.VITE_GITHUB_API_BASE;
+  if (apiBase) env.VITE_GITHUB_API_BASE = apiBase;
+  else delete env.VITE_GITHUB_API_BASE;
   execFileSync(
     process.execPath,
     [
