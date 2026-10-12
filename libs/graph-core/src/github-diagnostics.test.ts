@@ -64,6 +64,22 @@ describe('pinned GitHub diagnostics', () => {
       true,
     );
   });
+  it('accepts uppercase full SHAs as the canonical lowercase revision', async () => {
+    const base = 'ab'.repeat(20),
+      head = 'cd'.repeat(32);
+    let wrong = false;
+    const m = mock((p) => {
+      const ref = p.split('/commits/')[1];
+      if (ref) return json({ ...commit(1), sha: wrong ? sha(9) : ref.toLowerCase() });
+      return json(compare());
+    });
+    const a = createGitHubDiagnostics('o', 'r', m);
+    const result = await a.compare(base.toUpperCase(), head.toUpperCase());
+    expect(result.base.sha).toBe(base);
+    expect(result.head.sha).toBe(head);
+    wrong = true;
+    await expect(a.compare(base.toUpperCase(), head)).rejects.toThrow();
+  });
   it('paginates both unique lists and separates merge-base files from initial tree diff', async () => {
     const m = mock((p, url) => {
       if (p.includes('/commits/')) return json(commit(parseInt(p.slice(-4), 16)));

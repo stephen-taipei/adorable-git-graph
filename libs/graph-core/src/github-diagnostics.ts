@@ -168,8 +168,8 @@ export function createGitHubDiagnostics(
       { per_page: perPage, page },
       signal,
     );
-    sha(result.data.sha);
-    if (isFullSha(ref) && result.data.sha !== ref)
+    // GitHub answers with the canonical lowercase SHA.
+    if (isFullSha(ref) && sha(result.data.sha) !== ref.toLowerCase())
       throw new GitHubError('unknown', 'Pinned SHA mismatch');
     return result;
   }
