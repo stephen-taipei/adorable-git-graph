@@ -4,7 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import { findChrome } from './chrome-path.mjs';
@@ -12,6 +12,7 @@ import { fakeGithubPage, startFakeGithub } from './fake-github-page.mjs';
 import { OUTSIDE_SHA, sha, seen, latency, startMock } from './mock-github-api.mjs';
 import { inkRatio } from './pixels.mjs';
 import { cleanupViewerScope, prepareViewerScope, verifyViewerScope } from './viewer-scope.mjs';
+import { buildLanBundle, verifyCrossTabAuth, verifyLanHttp } from './app-auth-isolation.mjs';
 import {
   cleanupWebSourceIdentity,
   prepareWebSourceIdentity,
@@ -41,7 +42,7 @@ const artifacts = resolve(
 );
 mkdirSync(artifacts, { recursive: true });
 const errors = [];
-let browser, server, fake, child, ctx, background, setToken;
+let browser, server, fake, child, ctx, background, setToken, lanBundle;
 const token = 'fixture-diagnostic-token';
 const git = (...args) =>
   execFileSync('git', args, {
@@ -568,6 +569,9 @@ try {
     prepareViewerScope(root);
     prepareAppScope();
     const head = fixture();
+    // Shipped production bundle of this checkout, built from the fixture repo.
+    lanBundle = mkdtempSync(resolve(tmpdir(), 'agg-lan-bundle-'));
+    buildLanBundle({ root, repoDir: owned, outDir: resolve(lanBundle, 'dist') });
     child = spawn(
       process.execPath,
       [resolve(root, 'tools/start.mjs'), '--repo', owned, '--port', '4277'],
@@ -629,6 +633,14 @@ try {
     await verifyWebSourceIdentity({ page, ctx, api, root });
     await verifyViewerScope(page);
     await verifyAppScope(api);
+    await verifyCrossTabAuth({ browser, api, origin: 'http://localhost:4277', artifacts });
+    await verifyLanHttp({
+      browser,
+      outDir: resolve(lanBundle, 'dist'),
+      defaultRepo: basename(owned),
+      defaultCommits: 3,
+      artifacts,
+    });
     await page.goto(`http://localhost:4277/?repo=demo/adorable-git-graph&pull=7`);
   } else {
     const extension = resolve(owned, 'extension');
@@ -1017,5 +1029,6 @@ try {
   }
   if (mode === 'local') cleanupWebSourceIdentity(root);
   if (mode === 'local') for (const p of appScopeFiles) rmSync(p, { force: true });
+  if (lanBundle) rmSync(lanBundle, { recursive: true, force: true });
   rmSync(owned, { recursive: true, force: true });
 }

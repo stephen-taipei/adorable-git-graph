@@ -8,34 +8,14 @@ import { useStored } from './storage';
 import { locale, t } from './i18n';
 import { clearGitHubCache, useGraphSource } from './useGraphSource';
 import { DEFAULT_REPO } from './protocol';
-
-const TOKEN_KEY = 'agg.github-token';
-const VIEWER_NONCE_KEY = 'agg:viewer-auth-nonce:v1';
-const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
-
-function persistViewerNonce(): string {
-  const nonce = crypto.randomUUID();
-  sessionStorage.setItem(VIEWER_NONCE_KEY, nonce);
-  if (sessionStorage.getItem(VIEWER_NONCE_KEY) !== nonce) throw new Error('Nonce not persisted');
-  return nonce;
-}
-
-function initialAuthentication() {
-  try {
-    // A failed token read cannot establish an anonymous credential scope.
-    const token = localStorage.getItem(TOKEN_KEY) ?? '';
-    let nonce: string;
-    try {
-      const saved = sessionStorage.getItem(VIEWER_NONCE_KEY);
-      nonce = saved && UUID.test(saved) ? saved : persistViewerNonce();
-    } catch {
-      nonce = crypto.randomUUID();
-    }
-    return { token, nonce, tokenReadable: true };
-  } catch {
-    return { token: '', nonce: crypto.randomUUID(), tokenReadable: false };
-  }
-}
+import {
+  GENERATION_KEY,
+  TOKEN_KEY,
+  ephemeralScope,
+  initialAuth,
+  saveCredential,
+  syncAuth,
+} from './authScope';
 
 function useSource(): [Source, (s: Source) => void] {
   const [source, setSource] = useState<Source>(() => sourceFromSearch(location.search));
@@ -60,8 +40,41 @@ export function App() {
   // 靜態建置只有預設 repo：網址裡的 ?local= 不用帶回去
   if (source.kind === 'local') lastLocal.current = import.meta.env.DEV ? source : { kind: 'local' };
   const [theme, setTheme] = useStored('agg.theme', 'auto', isThemeSetting);
-  const [auth, setAuth] = useState(initialAuthentication);
+  const [auth, setAuth] = useState(initialAuth);
   const { token } = auth;
+  const authRef = useRef(auth);
+  authRef.current = auth;
+  // Another tab can change or clear the shared credential at any time. Adopt
+  // it with a new scope before anything restores or queries under it; that
+  // render drops the old graph, selection and diagnostics with their requests.
+  useEffect(() => {
+    const sync = () => {
+      const next = syncAuth(authRef.current);
+      if (next === authRef.current) return;
+      authRef.current = next;
+      clearGitHubCache();
+      setAuth(next);
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === TOKEN_KEY || e.key === GENERATION_KEY) sync();
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) sync();
+    };
+    const onVisible = () => {
+      if (!document.hidden) sync();
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisible);
+    // Changes made between the initial read and subscribing.
+    sync();
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const { state, refresh, repoName, diagnostics } = useGraphSource(source, token);
@@ -121,31 +134,21 @@ export function App() {
           onClose={() => setTokenOpen(false)}
           onSave={(next) => {
             try {
-              const persisted = localStorage.getItem(TOKEN_KEY);
-              if (
-                auth.tokenReadable &&
-                next === token &&
-                (next ? persisted === next : persisted === null)
-              ) {
-                setTokenOpen(false);
-                return;
+              // No token or fingerprint enters the viewer key or its metadata.
+              const saved = saveCredential(auth, next);
+              if (saved) {
+                clearGitHubCache();
+                authRef.current = saved;
+                setAuth(saved);
               }
-              // Rotate and verify before touching the credential. No token or
-              // fingerprint enters the viewer key or its persisted metadata.
-              const nonce = persistViewerNonce();
-              if (next) localStorage.setItem(TOKEN_KEY, next);
-              else localStorage.removeItem(TOKEN_KEY);
-              if (localStorage.getItem(TOKEN_KEY) !== (next || null)) {
-                throw new Error('Settings not persisted');
-              }
-              clearGitHubCache();
-              setAuth({ token: next, nonce, tokenReadable: true });
               setTokenError(null);
             } catch {
               // A partial write may have persisted the new token. An unused,
-              // ephemeral nonce makes both same-page and reload restoration
+              // ephemeral scope makes both same-page and reload restoration
               // fail closed without committing an uncertain auth change.
-              setAuth({ ...auth, nonce: crypto.randomUUID(), tokenReadable: false });
+              const failed = { ...auth, nonce: ephemeralScope(), tokenReadable: false };
+              authRef.current = failed;
+              setAuth(failed);
               setTokenError(
                 locale === 'zh-TW'
                   ? '設定尚未確認保存。請允許瀏覽器儲存後重試。'
