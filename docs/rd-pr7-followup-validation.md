@@ -5,6 +5,7 @@
 ## 狀態
 
 - **修正已推送，待 Codex 獨立正式驗收。**
+- 最新受測候選版本為 **`2eb2e47`**（見文末「第二輪」）；`19d41e3` 的結果保留在下方各節，不改寫。
 - 原始正式結果維持 **BLOCK**（`3eb1cb8`、Run `sbw-20261011T201955Z-a8a3cc81d327`、Package `review-5b6fe6a1273d586ad1e10f84bf7feec7`）。本頁是工程檢查，不是正式驗收，維持 HOLD。
 - 原 campaign `campaign-41b66b43bd4f86a8fb0a6cac89a94aad` 維持 13／13。沒有修改舊 ledger、signed runtime、signer／allowlist，也沒有建立新的 run、package 或 campaign。
 
@@ -100,9 +101,57 @@ Ink ratio（desktop／mobile）：local 0.0308／0.1184、Chrome 0.0308／0.1184
 - 升級過渡期殘留風險同 [rd-p1-fix-validation.md](rd-p1-fix-validation.md)：仍開著的舊版 bundle 分頁不輪替 generation，也沒有本次的寫入前檢查。
 - Credential 無法讀取的分頁在錯誤後明確重試時不做基準比對（沒有基準可比）。
 
-## 正式驗收待辦（交回 Codex）
+## 正式驗收待辦（`19d41e3` 時，已由第二輪取代）
 
 1. 取得適用授權後，以 `19d41e3` 建立 fixed-SHA 綁定與 production 產物，保留本機既有治理證據。
 2. 由授權方建立新的正式 review／治理額度（本次未建立），提供本頁、[rd-p1-fix-validation.md](rd-p1-fix-validation.md) 與 [rd-open-p1.md](rd-open-p1.md)。
 3. 視需要在 macOS、Chrome for Testing、本機 Firefox 補跑三套 `diagnostics.mjs`。
+4. 取得獨立 review 與 host-signed receipt 後由 `sbw complete` 判定；在此之前維持 HOLD，原始 BLOCK 不改為 PASS。
+
+## 第二輪：`2eb2e47`
+
+受測 SHA：`2eb2e47fb3900f9472affde0ce1a6aa9c342e826`（parent `0cbed56`）。Codex 核對 `19d41e3`／`0cbed56` 後，確認 P1 跨分頁覆寫回歸通過，另提出兩項 P2；兩項都只在測試工具，產品程式與 `19d41e3` 相同。
+
+| 問題                                                                                                          | 修正                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `app-auth-firefox.mjs`：失敗紀錄在 catch 內、清理之前寫入；寫入拋錯（或讀頁面不回應）會跳過清理並取代原始錯誤 | 失敗紀錄改為獨立的 best-effort 範圍，讀頁面最多等 3 秒；紀錄錯誤加入 `cleanupErrors`，仍拋出原始失敗，清理一定執行 |
+| `app-auth-firefox-cleanup.mjs`：launch 案例使用 `/bin/false`，macOS 沒有此路徑                                | 改用 `process.execPath`：Node 會真的啟動並因 Firefox 參數立即結束，Linux／macOS／Windows 都適用                    |
+
+**新增回歸**：清理案例 `record`（驗證失敗，且 artifacts 目錄不存在使紀錄寫入失敗）。
+
+- 修正前（`19d41e3` 的 helper）：子程序 120 秒內沒有自行結束；Firefox 程序與 `/tmp/agg-ff-app-profile-*` profile 遺留。遺留的 probe 程序與 profile 已手動清除。
+- 修正後：子程序自行結束（exit 0）；原始錯誤保留；`cleanupErrors` 只有「failure record: ENOENT …」；listener 拒絕連線、Firefox 程序已結束、profile 已移除。
+
+**清理回歸 5 案例結果**（`2eb2e47`）：
+
+| 案例      | 子程序結束 | 清理錯誤                                 | Firefox 程序 |
+| --------- | ---------- | ---------------------------------------- | ------------ |
+| `build`   | 0          | 無                                       | 未啟動       |
+| `launch`  | 0          | 無                                       | 未取得       |
+| `record`  | 0          | `failure record: ENOENT …`               | 已結束       |
+| `verify`  | 0          | 無                                       | 已結束       |
+| `cleanup` | 0          | `injected: fixture: cleanup step failed` | 已結束       |
+
+**命令與結果**（`2eb2e47`，乾淨工作樹，三組並行，479 秒）：
+
+| 命令                                        | 結果                                                                                                                                                                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm typecheck`／`pnpm test`／`pnpm build` | 通過；tests 276／276（graph-core 69、graph-ui 39、extension-core 47、web 121）                                                                                                                                                       |
+| Firefox lint、prettier、`git diff --check`  | 0 errors／4 warnings（與基線相同）；通過；通過                                                                                                                                                                                       |
+| `node tools/e2e/diagnostics.mjs local`      | 通過：兩分頁 11 情境、非 secure context 18 項、既有回歸                                                                                                                                                                              |
+| `node tools/e2e/diagnostics.mjs firefox`    | 通過：清理回歸 5 案例、Firefox App 4 項、extension 流程                                                                                                                                                                              |
+| `node tools/e2e/diagnostics.mjs chrome`     | 第一次在並行負載下失敗：`waitForEvent('serviceworker')` 15 秒逾時，發生在任何測試本體之前（與 [rd-validation.md](rd-validation.md) 已列的 service worker 啟動逾時相同）；單獨重跑一次通過。本 PR 未變更 extension 程式，原因仍未定位 |
+
+Ink ratio（desktop／mobile）：local 0.0308／0.1184、Chrome（重跑）0.0308／0.1184、Firefox 0.0288／0.1181。執行後沒有殘留 browser、Vite、launcher 或 Xvfb 行程；`/tmp` 沒有新增項目（Firefox 自行移除一個 `MozillaUpdateLock-*` 鎖檔）。
+
+### 尚未驗證（第二輪）
+
+- 同「尚未驗證」一節；另外 Chrome extension background service worker 偶發啟動逾時尚未定位（重跑通過）。
+- macOS 上的清理回歸由 Codex 本機驗證（本次只在 Linux 執行）。
+
+### 正式驗收待辦（現行，交回 Codex）
+
+1. 以 `2eb2e47` 建立 fixed-SHA 綁定與 production 產物，保留本機既有治理證據。
+2. 由授權方建立新的正式 review／治理額度（本次未建立），提供本頁、[rd-p1-fix-validation.md](rd-p1-fix-validation.md) 與 [rd-open-p1.md](rd-open-p1.md)。
+3. 在 macOS 補跑 `diagnostics.mjs firefox`（含清理回歸）與 local／chrome。
 4. 取得獨立 review 與 host-signed receipt 後由 `sbw complete` 判定；在此之前維持 HOLD，原始 BLOCK 不改為 PASS。
