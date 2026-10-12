@@ -67,6 +67,6 @@ node tools/e2e/diagnostics.mjs firefox
 pnpm build
 ```
 
-兩項 P1 的最新修正驗證見 [P1 修正驗證紀錄](rd-p1-fix-validation.md)。E2E 使用自建暫存 Git repo、mock GitHub API 與隔離 browser profile，截圖保存在各 app 的 `e2e/.artifacts/diagnostics`。`CHROME_PATH` 可指定 Chrome for Testing。Firefox 使用本機已安裝版本，測試用 manifest 才增加 localhost match；正式產物保留 GitHub-only 權限。macOS watcher 測試須在允許原生檔案通知的環境執行。
+兩項 P1 的最新修正驗證見 [P1 修正驗證紀錄](rd-p1-fix-validation.md)。E2E 使用自建暫存 Git repo、mock GitHub API 與隔離 browser profile，截圖保存在各 app 的 `e2e/.artifacts/diagnostics`。`CHROME_PATH` 可指定 Chrome for Testing。Local 與 Firefox 流程需要支援 `--no-lazy-fetch` 的 Git（完整 unit tests 需 2.52 以上的 `diff --max-depth`）；Linux 上 Firefox 流程在沒有 DISPLAY 時會自行啟動 Xvfb。Firefox 使用本機已安裝版本，測試用 manifest 才增加 localhost match；正式產物保留 GitHub-only 權限。macOS watcher 測試須在允許原生檔案通知的環境執行。
 
 回復時可切回實作前的 Git revision，重新 build 並 reload extension；診斷沒有修改所查詢 repo 的 refs、index 或 objects。使用者偏好可從 browser site storage 移除，不影響 repo。

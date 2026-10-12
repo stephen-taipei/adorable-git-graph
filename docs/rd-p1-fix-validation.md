@@ -5,6 +5,7 @@
 ## 狀態
 
 - **兩項 P1 已修正，待獨立正式驗收。**
+- 最新受測候選版本為第二輪 **`b531ac8`**（見文末「第二輪」）。第一輪 `f20038e` 的結果保留在下方各節，不改寫。
 - 原始正式結果維持 **BLOCK**（`3eb1cb8`、Run `sbw-20261011T201955Z-a8a3cc81d327`、Package `review-5b6fe6a1273d586ad1e10f84bf7feec7`，見 [rd-open-p1.md](rd-open-p1.md)）。本頁是工程檢查，不是正式驗收，不解除 BLOCK／HOLD。
 - 原 campaign `campaign-41b66b43bd4f86a8fb0a6cac89a94aad` 維持 13／13。本次沒有修改舊 ledger、signed runtime、signer／allowlist，也沒有建立新的 run、package 或 campaign。
 
@@ -98,7 +99,7 @@ E2E 的 desktop／mobile ink ratio：local 0.0308／0.1184、Chrome 0.0308／0.1
 - 本次 logs、screenshots 與 results JSON 產生在容器內 Git 忽略的 `apps/*/e2e/.artifacts/diagnostics` 與 session 暫存區，沒有推送；容器結束後不保留。本頁是摘要，不是 receipt，沒有簽章。
 - [rd-open-p1.md](rd-open-p1.md) 列出的本機 `apps/web/e2e/.artifacts/governance/` 原始證據不在 Cloud checkout 中；本次沒有讀取、修改或重建，也沒有以本頁取代。
 
-## 尚未驗證
+## 尚未驗證（第一輪）
 
 - 獨立正式 review、fixed-SHA 綁定、host-signed receipt 與 `sbw complete`。
 - macOS、Chrome for Testing 153、使用者既有 profile、真實 token／private repo。
@@ -108,9 +109,76 @@ E2E 的 desktop／mobile ink ratio：local 0.0308／0.1184、Chrome 0.0308／0.1
 - 升級過渡期：仍開著的舊版 bundle 分頁更換 credential 時不會輪替 generation。新版開啟中分頁仍會因 credential 變更換 scope，但當時未載入的新版分頁之後回來可能沿用舊 scope；舊分頁重新整理後消失。
 - 試用成功率與任務時間未實測。
 
-## 正式驗收待辦
+## 正式驗收待辦（第一輪，已由第二輪取代）
 
 1. 取得適用授權後，以 `f20038e` 建立 fixed-SHA 綁定與 production 產物，並保留本機既有治理證據。
+2. 由授權方建立新的正式 review／治理額度（本次未建立 run、package 或 campaign），提供本頁與 [rd-open-p1.md](rd-open-p1.md) 給 reviewer。
+3. 視需要在 macOS、Chrome for Testing、本機 Firefox 補跑 `diagnostics.mjs local／chrome／firefox`。
+4. 取得獨立 review 與 host-signed receipt 後由 `sbw complete` 判定；在此之前維持 HOLD，原始 BLOCK 不改為 PASS。
+
+## 第二輪：`b531ac8`
+
+驗證日期：2026-10-12。受測 SHA：`b531ac8fb69e128adda50cf8d33c7908bc814f83`（parent `516b177`）。本節所在 commit 只變更 `docs/`。環境與第一輪相同（Git 2.52.0、Chromium 141、Firefox 157）。
+
+### 自我 code review 與處置
+
+對 `3a236e6..b531ac8` 前的變更執行一次 code review（high），處置如下：
+
+| 發現                                                                                                              | 處置                                                                                                                               |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| TokenDialog 開啟時其他分頁更換／清除 credential，對話框仍保留舊草稿，儲存會覆蓋他分頁的變更                       | 修正：分頁採用跨分頁變更時關閉對話框；新增 E2E 斷言（在 `f20038e` App 上失敗、`b531ac8` 通過）                                     |
+| `onSave` 使用 render closure 的 `auth`，與 storage 事件已採用的狀態可能不同步                                     | 修正：改用最新採用的 `authRef.current`                                                                                             |
+| 每次 scope 輪替留下無法再恢復的 `agg:inspection:*` 紀錄                                                           | 修正：輪替時移除舊 scope 的 inspection 紀錄（`forgetScope`，單元測試覆蓋）                                                         |
+| `readShared` 在同一個 task 內重讀不會看到另一分頁的中間狀態，重試沒有作用                                         | 修正：移除重讀；註解與單元測試改為實際的容錯方式（generation 先寫；分頁先看到新 generation 時換 scope，credential 到達時再換一次） |
+| 曾嘗試的「舊版寫入者修補」（credential 變了但 generation 沒變時改寫 generation）在多 process 瀏覽器會誤判正常儲存 | 未採用並已移除；E2E 另確認採用變更的分頁不會再次輪替儲存分頁的 generation 與 scope。升級過渡期殘留風險維持文件說明                 |
+| Firefox 測試無法分辨請求來自哪個分頁                                                                              | 修正：兩分頁使用不同 repo，請求依 repo 歸屬分頁，並確認 A 以新 credential 重抓                                                     |
+| `diagnostics.mjs firefox` 缺 Git preflight，且 Linux 需手動 `xvfb-run`                                            | 修正：local／firefox 模式先檢查 `git --no-lazy-fetch`；firefox 模式在 Linux 沒有 DISPLAY 時自行啟動並關閉 Xvfb                     |
+
+### 新增回歸
+
+- Chromium 兩分頁（共 9 情境）：新增 A 錯過 storage 事件後由「回到前景」與「bfcache `pageshow`」重新核對採用變更兩個情境（以 capture listener 阻擋 App 的 storage 事件，再派送事件觸發 App 自己的 handler）；清除情境中 A 開著設定對話框；更換情境中確認儲存分頁 B 的 generation 與 scope record 在 A 採用後不變。
+- Firefox（[app-auth-firefox.mjs](../tools/e2e/app-auth-firefox.mjs)，由 `diagnostics.mjs firefox` 執行）：同一份 production App 在 `http://lan.rd.fixture.test:<port>/`（Firefox 以 `network.dns.localDomains` 解析到 loopback，origin 仍非 secure context）。檢查 `isSecureContext=false`、`randomUUID` undefined、預設 repo、設定儲存與 Bearer graph、診斷、同 credential 重載恢復、兩分頁更換（A 保持開啟後重載）及清除（A 離開後回來），舊 SHA 請求皆為 0。GitHub API 改由 loopback `http://127.0.0.1:<port>/gh` 提供，因為 GitHub client 依設計拒絕非 loopback 的 plain-HTTP API base；其他主機一律走失效 proxy。Firefox 沒有 React Profiler frame 紀錄，逐 frame 檢查只在 Chromium。
+- 單元測試：`authScope.test.ts` 22 項（含兩階段到達的儲存與 `forgetScope`）。
+
+### 重現與修正結果
+
+| 情境                                            | 修正前 App（`3a236e6`）                            | `b531ac8` |
+| ----------------------------------------------- | -------------------------------------------------- | --------- |
+| Chromium 兩分頁 9 情境                          | 8 失敗，只有同 credential 恢復通過                 | 9／9      |
+| Chromium 非 secure context                      | ErrorBoundary，`.web-root` 不存在                  | 18／18    |
+| Firefox 非 secure context＋兩分頁               | 預設 repo 即進入 ErrorBoundary「The view crashed」 | 4／4      |
+| Stale 設定對話框（以第一輪 `f20038e` App 執行） | 1／9 失敗：「stale settings draft closed」         | 通過      |
+| 既有同分頁 17 項                                | 通過                                               | 17／17    |
+
+修正前結果的取得方式與第一輪相同：工作樹暫時還原 App（及第一輪的 `authScope.ts`），測試檔與受測 commit 位元組相同，執行後還原並以 `cmp` 確認。
+
+### 命令與結果（`b531ac8`，乾淨工作樹，`--skip-nx-cache`）
+
+| 命令                                             | 結果                                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------- |
+| `pnpm typecheck`                                 | 通過                                                                        |
+| `pnpm test`                                      | 272／272：graph-core 68、graph-ui 39、extension-core 47、web 118            |
+| `pnpm build`                                     | 通過（web、Chrome、Firefox）；web bundle 不含 `randomUUID`                  |
+| `pnpm --filter @adorable/extension-firefox lint` | 0 errors／0 notices／4 warnings（與基線相同）                               |
+| `npx prettier --check .`、`git diff --check`     | 通過                                                                        |
+| `node tools/e2e/diagnostics.mjs local`           | 通過；兩分頁 9 情境、非 secure context 18 項、既有回歸                      |
+| `node tools/e2e/diagnostics.mjs chrome`          | 通過                                                                        |
+| `node tools/e2e/diagnostics.mjs firefox`         | 通過（未設 DISPLAY，由腳本自行啟動 Xvfb）；Firefox App 4 項＋extension 流程 |
+
+Ink ratio（desktop／mobile）：local 0.0308／0.1184、Chrome 0.0308／0.1184、Firefox 0.0314／0.1181。執行後沒有殘留 browser、Vite、launcher 或 Xvfb 行程，`/tmp` 沒有新增項目。證據保存方式與限制同第一輪：原始 logs 與 results JSON 只在 Cloud 容器的 Git 忽略目錄與 session 暫存區，沒有推送，也沒有 receipt 或簽章。
+
+### 尚未驗證（第二輪）
+
+- 獨立正式 review、fixed-SHA 綁定、host-signed receipt 與 `sbw complete`。
+- macOS、Chrome for Testing 153、使用者既有 profile、真實 token／private repo、Safari／iOS PWA。
+- Firefox 只做 DOM 與請求層級檢查；逐 committed frame 檢查只在 Chromium。
+- 回到前景與 bfcache 重新核對以派送事件觸發 App 的 handler，不是真實分頁凍結或 bfcache。
+- 同一 browser context 的分頁通常共用 renderer，測不到另一分頁兩個 key 分兩次套用；此路徑只由單元測試覆蓋。
+- 升級過渡期：仍開著的舊版 bundle 分頁更換 credential 時不輪替 generation，當時未載入的新版分頁之後回來可能沿用舊 scope。修補方案因會誤判正常儲存而未採用；舊分頁重新整理後即不再發生。
+
+### 正式驗收待辦（現行）
+
+1. 取得適用授權後，以 `b531ac8` 建立 fixed-SHA 綁定與 production 產物，保留本機既有治理證據。
 2. 由授權方建立新的正式 review／治理額度（本次未建立 run、package 或 campaign），提供本頁與 [rd-open-p1.md](rd-open-p1.md) 給 reviewer。
 3. 視需要在 macOS、Chrome for Testing、本機 Firefox 補跑 `diagnostics.mjs local／chrome／firefox`。
 4. 取得獨立 review 與 host-signed receipt 後由 `sbw complete` 判定；在此之前維持 HOLD，原始 BLOCK 不改為 PASS。
