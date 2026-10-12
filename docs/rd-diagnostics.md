@@ -20,7 +20,7 @@ pnpm start --repo /absolute/path/to/repo
 
 分支檔案語意固定為 `merge-base → head`。它與 `base tree → head tree` 不同。Merge commit 預設 first parent，可切換到來源實際回傳的其他 parent。Root commit 先確認不是 shallow 邊界，再與 empty tree 比較。沒有共同祖先或有多個 merge base 時，本機可以保留已核對的分歧計數，但不選擇檔案比較基準。
 
-「關閉動畫」會記住偏好，並尊重系統 reduced-motion。每個 repo 的基本選取、branch 焦點與搜尋會以 sessionStorage 保存，並記錄所在 commit／PR context。相同 commit 頁重開會還原手動選取；導覽到另一個 commit 時，會選取新的 URL context。不保存本機路徑、檔案內容或 token。
+「關閉動畫」會記住偏好，並尊重系統 reduced-motion。每個 repo 的基本選取、branch 焦點與搜尋會以 sessionStorage 保存，並記錄所在 commit／PR context。相同 commit 頁重開會還原手動選取；導覽到另一個 commit 時，會選取新的 URL context。不保存本機路徑、檔案內容或 token。另一個分頁更換或清除 GitHub token 時，開啟中的分頁會立即放棄舊結果與選取，重載也不恢復舊 token 下的焦點。
 
 ## Chrome／Firefox 同步更新
 
@@ -67,6 +67,6 @@ node tools/e2e/diagnostics.mjs firefox
 pnpm build
 ```
 
-E2E 使用自建暫存 Git repo、mock GitHub API 與隔離 browser profile，截圖保存在各 app 的 `e2e/.artifacts/diagnostics`。`CHROME_PATH` 可指定 Chrome for Testing。Firefox 使用本機已安裝版本，測試用 manifest 才增加 localhost match；正式產物保留 GitHub-only 權限。macOS watcher 測試須在允許原生檔案通知的環境執行。
+兩項 P1 的最新修正驗證見 [P1 修正驗證紀錄](rd-p1-fix-validation.md)。E2E 使用自建暫存 Git repo、mock GitHub API 與隔離 browser profile，截圖保存在各 app 的 `e2e/.artifacts/diagnostics`。`CHROME_PATH` 可指定 Chrome for Testing。Firefox 使用本機已安裝版本，測試用 manifest 才增加 localhost match；正式產物保留 GitHub-only 權限。macOS watcher 測試須在允許原生檔案通知的環境執行。
 
 回復時可切回實作前的 Git revision，重新 build 並 reload extension；診斷沒有修改所查詢 repo 的 refs、index 或 objects。使用者偏好可從 browser site storage 移除，不影響 repo。
