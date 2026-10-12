@@ -24,6 +24,7 @@ export interface GitGraphCanvasProps {
   onError?: (error: unknown) => void;
   /** 資料來源的識別（例如 local / github）。換來源時即使 repo 同名也要當成全新的圖，而不是增量更新。 */
   sourceKey?: string;
+  reducedMotion?: boolean;
 }
 
 /**
@@ -41,11 +42,12 @@ export function GitGraphCanvas({
   handleRef,
   onError,
   sourceKey,
+  reducedMotion = false,
 }: GitGraphCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<LogGraphScene | null>(null);
-  const cb = useRef({ onError, theme, metrics, selectedSha, focus });
-  cb.current = { onError, theme, metrics, selectedSha, focus };
+  const cb = useRef({ onError, theme, metrics, selectedSha, focus, reducedMotion });
+  cb.current = { onError, theme, metrics, selectedSha, focus, reducedMotion };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -55,7 +57,10 @@ export function GitGraphCanvas({
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     let scene: LogGraphScene;
     try {
-      scene = new LogGraphScene(host, { theme: cb.current.theme, reducedMotion: mq.matches });
+      scene = new LogGraphScene(host, {
+        theme: cb.current.theme,
+        reducedMotion: mq.matches || cb.current.reducedMotion,
+      });
     } catch (err) {
       cb.current.onError?.(err);
       return;
@@ -70,7 +75,7 @@ export function GitGraphCanvas({
       scene.setPointer(e.clientX - r.left, e.clientY - r.top);
     };
     const onLeave = () => scene.setPointer(null);
-    const onMq = () => scene.setReducedMotion(mq.matches);
+    const onMq = () => scene.setReducedMotion(mq.matches || cb.current.reducedMotion);
     scroller.addEventListener('scroll', sync, { passive: true });
     track.addEventListener('pointermove', onMove, { passive: true });
     track.addEventListener('pointerleave', onLeave);
@@ -92,6 +97,12 @@ export function GitGraphCanvas({
       sceneRef.current = null;
     };
   }, [scrollerRef, trackRef]);
+
+  useEffect(() => {
+    sceneRef.current?.setReducedMotion(
+      reducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    );
+  }, [reducedMotion]);
 
   // 尺寸（列高 / lane 間距 / 欄寬）改變：不重播
   useEffect(() => {

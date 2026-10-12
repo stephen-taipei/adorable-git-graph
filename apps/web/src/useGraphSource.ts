@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import snapshot from 'virtual:git-snapshot';
-import { GitHubError, buildLayout, fetchGitHubGraph } from '@adorable/graph-core';
+import {
+  GitHubError,
+  buildLayout,
+  fetchGitHubGraph,
+  createGitHubDiagnostics,
+  cacheDiagnostics,
+} from '@adorable/graph-core';
+import type { DiagnosticAdapter } from '@adorable/graph-core';
+import { createLocalAdapter } from './diagnostics';
 import type { GraphData } from '@adorable/graph-core';
 import type { ViewerState } from '@adorable/graph-ui';
 import { DEFAULT_REPO, HMR_EVENT, isRepoId, snapshotKey } from './protocol';
@@ -99,23 +107,30 @@ function useLocalSnapshot(id: string, selection: unknown) {
 
 type Remote =
   | { kind: 'loading' }
-  | { kind: 'error'; code: string; message?: string; resetAt?: number }
-  | { kind: 'ready'; graph: GraphData };
+  | { kind: 'error'; sourceIdentity: object; code: string; message?: string; resetAt?: number }
+  | { kind: 'ready'; sourceIdentity: object; graph: GraphData };
 
 interface GhCacheEntry {
   savedAt: number;
   graph: GraphData;
-  /** 是否帶 token 抓的：帶 token 抓到的可能是私有 repo，沒有 token 時不能再拿來用。 */
-  authed: boolean;
+  /** Private credential fingerprint; old boolean-only entries are not trusted. */
+  credentialScope: string;
 }
 
-function readGhCache(key: string, authed: boolean): GraphData | null {
+async function githubCredentialScope(token: string): Promise<string | null> {
+  // Non-secure static hosts can still query; disable caching when WebCrypto is unavailable.
+  if (!globalThis.crypto?.subtle) return null;
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, '0')).join('');
+}
+function readGhCache(key: string, scope: string | null): GraphData | null {
+  if (!scope) return null;
   try {
     const raw = sessionStorage.getItem(GH_CACHE_PREFIX + key);
     if (!raw) return null;
     const entry = JSON.parse(raw) as GhCacheEntry;
     if (Date.now() - entry.savedAt >= GH_CACHE_MS) return null;
-    if (entry.authed && !authed) return null;
+    if (entry.credentialScope !== scope) return null;
     return entry.graph;
   } catch {
     return null;
@@ -133,9 +148,10 @@ export function clearGitHubCache(): void {
   }
 }
 
-function writeGhCache(key: string, graph: GraphData, authed: boolean) {
+function writeGhCache(key: string, graph: GraphData, scope: string | null) {
+  if (!scope) return;
   try {
-    const entry: GhCacheEntry = { savedAt: Date.now(), graph, authed };
+    const entry: GhCacheEntry = { savedAt: Date.now(), graph, credentialScope: scope };
     sessionStorage.setItem(GH_CACHE_PREFIX + key, JSON.stringify(entry));
   } catch {
     /* 容量不足等：略過 */
@@ -148,68 +164,89 @@ function useGitHubGraph(source: Source, token: string) {
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<{ code: string; message?: string } | null>(null);
-  const remoteRef = useRef(remote);
-  remoteRef.current = remote;
+  const key = source.kind === 'github' ? (source.owner + '/' + source.repo).toLowerCase() : '';
+  // Opaque render identity: no credential value or fingerprint reaches the viewer.
+  const identity = useMemo(() => ({}), [source.kind, key, token]);
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  const current =
+    remote.kind === 'loading' || remote.sourceIdentity === identity
+      ? remote
+      : ({ kind: 'loading' } as const);
+  const remoteRef = useRef(current);
+  remoteRef.current = current;
   const force = useRef(false);
-
-  const key = source.kind === 'github' ? `${source.owner}/${source.repo}`.toLowerCase() : '';
 
   useEffect(() => {
     if (source.kind !== 'github') return;
-    const forced = force.current;
+    const forced =
+      force.current &&
+      remoteRef.current.kind === 'ready' &&
+      remoteRef.current.sourceIdentity === identity;
     force.current = false;
-    if (!forced) {
-      const hit = readGhCache(key, Boolean(token));
-      if (hit) {
-        setRefreshing(false);
-        setRemote({ kind: 'ready', graph: hit });
-        return;
-      }
-    }
-
     const ctrl = new AbortController();
-    // 重新整理時留著舊圖（捲動位置與選取不動）；換 repo / token 才回到 loading
-    setRemote((prev) => (forced && prev.kind === 'ready' ? prev : { kind: 'loading' }));
+    const active = () => !ctrl.signal.aborted && identityRef.current === identity;
+    setRemote((prev) =>
+      forced && prev.kind === 'ready' && prev.sourceIdentity === identity
+        ? prev
+        : { kind: 'loading' },
+    );
     setRefreshing(forced);
     setRefreshError(null);
-    // 重新整理失敗時保留原本的圖，只回報錯誤
     const fail = (err: { code: string; message?: string; resetAt?: number }) => {
-      if (forced && remoteRef.current.kind === 'ready') setRefreshError(err);
-      else setRemote({ kind: 'error', ...err });
+      if (!active()) return;
+      setRefreshing(false);
+      if (
+        forced &&
+        remoteRef.current.kind === 'ready' &&
+        remoteRef.current.sourceIdentity === identity
+      )
+        setRefreshError(err);
+      else setRemote({ kind: 'error', sourceIdentity: identity, ...err });
     };
-    fetchGitHubGraph(source.owner, source.repo, {
-      token: token || undefined,
-      apiBase: API_BASE,
-      signal: ctrl.signal,
-    }).then(
-      (graph) => {
-        writeGhCache(key, graph, Boolean(token));
-        setRefreshing(false);
-        setRemote({ kind: 'ready', graph });
-      },
-      (err: unknown) => {
-        if (ctrl.signal.aborted) return;
-        setRefreshing(false);
-        if (err instanceof GitHubError) {
-          fail({ code: err.code, message: err.message, resetAt: err.resetAt });
-        } else {
-          fail({ code: 'unknown', message: err instanceof Error ? err.message : String(err) });
+    void (async () => {
+      // Cache scopes are private to this module/storage, never part of UI or diagnostic data.
+      const scope = await githubCredentialScope(token);
+      if (!active()) return;
+      if (!forced) {
+        const hit = readGhCache(key, scope);
+        if (hit && active()) {
+          setRefreshing(false);
+          setRemote({ kind: 'ready', sourceIdentity: identity, graph: hit });
+          return;
         }
-      },
-    );
+      }
+      const graph = await fetchGitHubGraph(source.owner, source.repo, {
+        token: token || undefined,
+        apiBase: API_BASE,
+        signal: ctrl.signal,
+      });
+      if (!active()) return;
+      writeGhCache(key, graph, scope);
+      setRefreshing(false);
+      setRemote({ kind: 'ready', sourceIdentity: identity, graph });
+    })().catch((err: unknown) => {
+      if (err instanceof GitHubError)
+        fail({ code: err.code, message: err.message, resetAt: err.resetAt });
+      else fail({ code: 'unknown', message: err instanceof Error ? err.message : String(err) });
+    });
     return () => ctrl.abort();
-    // token 變更要重抓（可能解鎖私有 repo / 提高額度）
-  }, [source.kind, key, token, nonce]);
+  }, [source.kind, key, token, nonce, identity]);
 
   const refresh = useCallback(() => {
     force.current = true;
     setNonce((n) => n + 1);
   }, []);
-
-  return { remote, refresh, refreshing, refreshError };
+  return {
+    remote: current,
+    refresh,
+    refreshing: current.kind === 'ready' && refreshing,
+    refreshError: current.kind === 'ready' ? refreshError : null,
+  };
 }
 
 export interface GraphSource {
+  diagnostics?: DiagnosticAdapter;
   state: ViewerState;
   /** 沒有後端可重讀時（靜態建置的本機快照）為 undefined，UI 不顯示重新整理。 */
   refresh: (() => void) | undefined;
@@ -223,6 +260,29 @@ export function useGraphSource(source: Source, token: string): GraphSource {
     import.meta.env.DEV && source.kind === 'local' ? (source.id ?? DEFAULT_REPO) : DEFAULT_REPO;
   const local = useLocalSnapshot(localId, source);
   const gh = useGitHubGraph(source, token);
+  const diagnostics = useMemo(
+    () =>
+      source.kind === 'github'
+        ? cacheDiagnostics({
+            ...createGitHubDiagnostics(source.owner, source.repo, {
+              token: token || undefined,
+              apiBase: API_BASE,
+            }),
+            context: { commit: source.commit, pullRequest: source.pullRequest },
+          })
+        : import.meta.env.DEV
+          ? cacheDiagnostics(createLocalAdapter(localId))
+          : undefined,
+    [
+      source.kind,
+      source.kind === 'github' ? source.owner : '',
+      source.kind === 'github' ? source.repo : '',
+      source.kind === 'github' ? source.commit : '',
+      source.kind === 'github' ? source.pullRequest : '',
+      localId,
+      token,
+    ],
+  );
   // dev server 說不認得 / 不給看這個 repo 時，不要繼續顯示快取的舊圖（它不會再更新了）
   const localSnap =
     local.missing === 'unknown' || local.missing === LOCAL_ONLY ? undefined : local.snap;
@@ -270,6 +330,7 @@ export function useGraphSource(source: Source, token: string): GraphSource {
 
   return {
     state,
+    diagnostics,
     refresh:
       source.kind === 'github'
         ? gh.refresh

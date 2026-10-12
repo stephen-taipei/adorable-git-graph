@@ -13,7 +13,9 @@ function refresh() {
   const same =
     next?.owner === current?.owner &&
     next?.repo === current?.repo &&
-    next?.branchHint === current?.branchHint;
+    next?.branchHint === current?.branchHint &&
+    next?.commit === current?.commit &&
+    next?.pullRequest === current?.pullRequest;
   if (same) return;
   current = next;
   listeners.forEach((l) => l());

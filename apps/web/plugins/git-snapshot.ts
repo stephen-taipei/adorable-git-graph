@@ -4,6 +4,8 @@ import { accessSync, constants, lstatSync, readdirSync, statSync, watch } from '
 import type { Dirent, FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
+import type { TLSSocket } from 'node:tls';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -14,12 +16,16 @@ import {
   buildGitGraphData,
   parseForEachRef,
   selectRefs,
+  coverage,
+  isDiagnosticRequest,
 } from '@adorable/graph-core';
+import { createLocalDiagnostics } from './diagnostics.ts';
 import {
   DEFAULT_REPO,
   HMR_EVENT,
   REPOS_ENDPOINT,
   SNAPSHOT_ENDPOINT,
+  DIAGNOSTICS_ENDPOINT,
   isRepoId,
   snapshotKey,
 } from '../src/protocol.ts';
@@ -139,9 +145,70 @@ const REPO_LOCATING_ENV = [
 
 function gitEnv(): NodeJS.ProcessEnv {
   // 唯讀操作也避免 index 鎖，LC_ALL 讓輸出格式（含錯誤訊息）穩定
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_NO_LAZY_FETCH: '1',
+    GIT_TERMINAL_PROMPT: '0',
+    LC_ALL: 'C',
+  };
   for (const name of REPO_LOCATING_ENV) delete env[name];
   return env;
+}
+
+const diagnosticGitSupport = new Map<string, Promise<boolean>>();
+/** Missing promisor objects must never cause implicit downloads or write refs/index. */
+export async function runDiagnosticGit(
+  repoDir: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  const bin = findGit();
+  if (!bin) throw new Error('git_unavailable');
+  const env = gitEnv();
+  for (const key of Object.keys(env)) {
+    if (/^GIT_CONFIG(?:_|$)/.test(key) || /^GIT_(?:GLOB|NOGLOB|ICASE)_PATHSPECS$/.test(key))
+      delete env[key];
+  }
+  let supported = diagnosticGitSupport.get(bin);
+  if (!supported) {
+    supported = execFileAsync(bin, ['--no-lazy-fetch', '--version'], { env, timeout: 5000 }).then(
+      () => true,
+      () => false,
+    );
+    diagnosticGitSupport.set(bin, supported);
+  }
+  if (!(await supported)) throw new Error('safe_git_unavailable');
+  try {
+    const pending = execFileAsync(
+      bin,
+      [
+        '--no-pager',
+        '--no-lazy-fetch',
+        '--no-replace-objects',
+        '--literal-pathspecs',
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        'log.showSignature=false',
+        '-c',
+        'color.ui=false',
+        '-C',
+        repoDir,
+        ...args,
+      ],
+      { env, timeout: 15_000, maxBuffer: 8 * 1024 * 1024, signal },
+    );
+    pending.child.stdin?.end();
+    const { stdout } = await pending;
+    return stdout;
+  } catch (err) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const code = (err as { code?: unknown }).code;
+    throw Object.assign(new Error('git_query_failed'), {
+      code: typeof code === 'number' ? code : undefined,
+    });
+  }
 }
 
 /** 不經 shell（execFile），參數全是我們組出來的 ref 名稱，不會被當成選項。 */
@@ -150,12 +217,39 @@ async function git(cwd: string, args: string[]): Promise<string> {
   if (!bin) throw Object.assign(new Error('git is not installed'), { code: 'ENOENT' });
   // `-C` 而不是 spawn 的 cwd：spawn 會等子行程 chdir 完才回來，目錄在卡住的網路磁碟上時整個 dev server 會跟著停住；
   // 交給 git 自己 chdir，卡住的只有那個子行程（60 秒後被砍掉）
-  const { stdout } = await execFileAsync(bin, ['-C', cwd, ...args], {
-    maxBuffer: 256 * 1024 * 1024,
-    // 網路磁碟卡住等：不要讓 git 子行程與等待中的請求永遠掛著
-    timeout: 60_000,
-    env: gitEnv(),
-  });
+  let supported = diagnosticGitSupport.get(bin);
+  if (!supported) {
+    supported = execFileAsync(bin, ['--no-lazy-fetch', '--version'], {
+      env: gitEnv(),
+      timeout: 5000,
+    }).then(
+      () => true,
+      () => false,
+    );
+    diagnosticGitSupport.set(bin, supported);
+  }
+  if (!(await supported)) throw new Error('safe_git_unavailable');
+  const { stdout } = await execFileAsync(
+    bin,
+    [
+      '--no-pager',
+      '--no-lazy-fetch',
+      '--no-replace-objects',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'log.showSignature=false',
+      '-C',
+      cwd,
+      ...args,
+    ],
+    {
+      maxBuffer: 256 * 1024 * 1024,
+      // 網路磁碟卡住等：不要讓 git 子行程與等待中的請求永遠掛著
+      timeout: 60_000,
+      env: gitEnv(),
+    },
+  );
   return stdout;
 }
 
@@ -278,11 +372,10 @@ export async function readGitSnapshot(
     });
 
     // branch 一個都沒有（CI 的 detached HEAD 等）時改從 HEAD 往回走
-    const logRefs = selected.logRefs.length
-      ? selected.logRefs
-      : (await gitOrUndefined(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']))
-        ? ['HEAD']
-        : [];
+    const detachedTip = selected.logRefs.length
+      ? undefined
+      : await gitOrUndefined(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+    const logRefs = selected.logRefs.length ? selected.logRefs : detachedTip ? [detachedTip] : [];
 
     // 先把選好的 ref 解析成 sha，再交給 git log：避免讀取途中 ref 移動造成「branch 標籤落後最新 commit」的不一致快照
     const tips = selected.refs.length ? [...new Set(selected.refs.map((r) => r.sha))] : logRefs;
@@ -326,6 +419,28 @@ export async function readGitSnapshot(
     });
     // shallow clone 的邊界 commit 看起來像 root：至少要讓畫面標示「更早的歷史已省略」
     if (shallow === 'true') graph.truncated = true;
+    const branchTotal = allRefs.filter((r) => r.kind === 'branch').length;
+    const branchLoaded = graph.refs.filter((r) => r.kind === 'branch').length;
+    const omittedRefs = graph.refs.length < allRefs.length;
+    graph.coverage = {
+      source: 'local',
+      observedAt: generatedAt,
+      remoteRefsAreLocal: true,
+      refs: coverage(
+        omittedRefs ? 'partial' : 'complete',
+        omittedRefs ? ['ref_selection'] : [],
+        branchLoaded,
+        branchTotal,
+      ),
+      commits: coverage(
+        graph.truncated ? 'partial' : 'complete',
+        [
+          ...(shallow === 'true' ? ['shallow'] : []),
+          ...(graph.truncated && shallow !== 'true' ? ['history_limit'] : []),
+        ],
+        graph.commits.length,
+      ),
+    };
     return { graph, generatedAt };
   } catch (err) {
     if (err instanceof SnapshotError) return fail(err.message, err.code);
@@ -718,14 +833,19 @@ class RepoSession {
         ),
       ];
       if (this.stopped) return;
+      const startingSignature = await refsSignature(this.dir);
+      if (this.stopped) return;
       stopWatching = watchGitRefs(dirs, onChange);
       this.watching = true;
+      // Reconcile the snapshot with refs observed after installing native watchers.
+      await this.sync();
+      if (this.stopped) return;
 
       // 安全網：檔案監看可能漏事件（網路磁碟、inotify 上限…），偶爾比對一次 ref 簽章
       // 一次只跑一輪：上一輪的 git 還沒回來（網路磁碟很慢）就不要再疊新的行程
       const pollMs = this.hooks.options.pollMs ?? 2000;
       if (pollMs > 0) {
-        let sig = await refsSignature(this.dir);
+        let sig = startingSignature;
         const tick = () => {
           if (this.stopped) return;
           poll = setTimeout(() => {
@@ -782,20 +902,59 @@ const sendJson = (res: ServerResponse, status: number, body: unknown) => {
 /**
  * 只回應同源頁面；`direct` 時也允許沒有 fetch metadata 的直接請求（網址列、curl）。
  * 其他 localhost 埠上的頁面不能偷看本機 commit、未推送的 branch 與資料夾位置。
- * 偽造的 Host（DNS rebinding）在進到這裡之前就會被 Vite 自己的 host 檢查擋掉。
+ * Origin 必須與實際連線的 protocol、Host 及 port 一致；fetch metadata 不能覆寫衝突的 Origin。
  */
 export function isSameOrigin(req: IncomingMessage, direct: boolean): boolean {
-  const site = req.headers['sec-fetch-site'];
-  if (site) return site === 'same-origin' || (direct && site === 'none');
+  const target = requestOrigin(req);
+  if (!target) return false;
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin !== undefined) {
     try {
-      return new URL(origin).host === req.headers.host;
+      const url = new URL(origin);
+      if (
+        url.origin !== target.origin ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash
+      )
+        return false;
     } catch {
       return false;
     }
   }
-  return direct;
+  const site = req.headers['sec-fetch-site'];
+  if (site) return site === 'same-origin' || (direct && site === 'none');
+  return origin !== undefined || direct;
+}
+
+function requestOrigin(req: IncomingMessage): URL | undefined {
+  const host = req.headers.host;
+  if (!host || /[\s\\/@?#,]/.test(host)) return;
+  try {
+    const protocol = (req.socket as TLSSocket | undefined)?.encrypted ? 'https' : 'http';
+    return new URL(`${protocol}://${host}`);
+  } catch {
+    return;
+  }
+}
+
+/** Keep the local data boundary even when Vite's general allowedHosts check is disabled. */
+function isAllowedHost(req: IncomingMessage, allowedHosts: string[]): boolean {
+  const origin = requestOrigin(req);
+  if (!origin) return false;
+  const host = origin.hostname
+    .toLowerCase()
+    .replace(/\.$/, '')
+    .replace(/^\[|\]$/g, '');
+  if (isIP(host) || host === 'localhost' || host.endsWith('.localhost')) return true;
+  return allowedHosts.some((value) => {
+    const allowed = value.toLowerCase().replace(/\.$/, '');
+    return allowed.startsWith('.')
+      ? host === allowed.slice(1) || host.endsWith(allowed)
+      : host === allowed;
+  });
 }
 
 /**
@@ -838,6 +997,7 @@ const RESOLVED_ID = `\0${VIRTUAL_ID}`;
  * 另外提供本機 repo 清單與任一 repo 的快照，讓畫面可以切換要看哪個本機 repo。
  */
 export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
+  let allowedHosts: string[] = [];
   let repoDir = options.repoDir ?? process.env['AGG_REPO_DIR'] ?? process.cwd();
   let warn: (m: string) => void = options.onWarn ?? ((m) => console.warn(`[git-snapshot] ${m}`));
   let push: (repo: string, snap: GitSnapshot) => void = () => {};
@@ -854,6 +1014,10 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
   return {
     name: 'adorable-git-snapshot',
     configResolved(config) {
+      allowedHosts = [
+        ...(Array.isArray(config.server?.allowedHosts) ? config.server.allowedHosts : []),
+        ...(typeof config.server?.host === 'string' ? [config.server.host] : []),
+      ];
       repoDir = options.repoDir ?? process.env['AGG_REPO_DIR'] ?? config.root;
       stateFile =
         options.stateFile ?? process.env['AGG_LOCAL_REPOS_FILE'] ?? defaultStateFile(config.root);
@@ -871,6 +1035,14 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
     async configureServer(server) {
       // vitest 只是借用 Vite 的轉換管線，不需要讀 git 也不需要監看
       if (process.env['VITEST']) return;
+      // The virtual module also contains local history. Guard every HTTP entry
+      // before Vite transforms or serves cached module bytes, including aliases
+      // and query variants of virtual:git-snapshot.
+      server.middlewares.use((req, res, next) => {
+        if (!isAllowedHost(req, allowedHosts) || !isSameOrigin(req, true))
+          return sendJson(res, 403, { error: 'forbidden' });
+        next();
+      });
       await serveLocalRepos(server);
     },
   };
@@ -1118,7 +1290,75 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
       return { status: 200, body: { repo: toPublic(entry) } };
     };
 
+    server.middlewares.use(DIAGNOSTICS_ENDPOINT, (req, res) => {
+      if (!isAllowedHost(req, allowedHosts)) return sendJson(res, 403, { error: 'forbidden' });
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
+      if (!isLoopback(req) || !isSameOrigin(req, false))
+        return sendJson(res, 403, { error: 'local_only' });
+      if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? ''))
+        return sendJson(res, 415, { error: 'unsupported_media_type' });
+      const ctrl = new AbortController();
+      req.once('aborted', () => ctrl.abort());
+      res.once('close', () => {
+        if (!res.writableEnded) ctrl.abort();
+      });
+      void readBody(req, 16384)
+        .then(
+          async (raw) => {
+            let body: Record<string, unknown>;
+            try {
+              body = JSON.parse(raw);
+            } catch {
+              return sendJson(res, 400, { error: 'invalid_request' });
+            }
+            if (!body || Array.isArray(body) || typeof body !== 'object')
+              return sendJson(res, 400, { error: 'invalid_request' });
+            if (
+              !isDiagnosticRequest(body) ||
+              body.operation === 'pull-request' ||
+              (body as Record<string, unknown>)['commitRepo'] !== undefined ||
+              (body as Record<string, unknown>)['headRepo'] !== undefined
+            )
+              return sendJson(res, 400, { error: 'invalid_request' });
+            const id = (body as Record<string, unknown>)['repo'] ?? DEFAULT_REPO;
+            if (typeof id !== 'string' || !isRepoId(id))
+              return sendJson(res, 400, { error: 'invalid_repo' });
+            const entry = id === DEFAULT_REPO ? defaultEntry : await findEntry(id);
+            if (!entry) return sendJson(res, 404, { error: 'unknown_repo' });
+            const adapter = createLocalDiagnostics(entry.dir, (args, signal) =>
+              runDiagnosticGit(entry.dir, args, signal),
+            );
+            let data: unknown;
+            switch (body['operation']) {
+              case 'compare':
+                data = await adapter.compare(body.base, body.head, ctrl.signal);
+                break;
+              case 'changes':
+                data = await adapter.changes(body.sha, body.parent, ctrl.signal);
+                break;
+              case 'patch':
+                data = await adapter.patch(
+                  body.base,
+                  body.head,
+                  body.path,
+                  body.previousPath,
+                  ctrl.signal,
+                );
+                break;
+              default:
+                return sendJson(res, 400, { error: 'invalid_operation' });
+            }
+            if (!ctrl.signal.aborted) sendJson(res, 200, data);
+          },
+          () => sendJson(res, 413, { error: 'too_large' }),
+        )
+        .catch(() => {
+          if (!ctrl.signal.aborted) sendJson(res, 422, { error: 'diagnostic_unavailable' });
+        });
+    });
+
     server.middlewares.use(SNAPSHOT_ENDPOINT, (req, res) => {
+      if (!isAllowedHost(req, allowedHosts)) return sendJson(res, 403, { error: 'forbidden' });
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'method_not_allowed' });
       if (!isSameOrigin(req, true)) return sendJson(res, 403, { error: 'forbidden' });
       let id: string;
@@ -1143,6 +1383,7 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
     });
 
     server.middlewares.use(REPOS_ENDPOINT, (req, res) => {
+      if (!isAllowedHost(req, allowedHosts)) return sendJson(res, 403, { error: 'forbidden' });
       if (req.method !== 'GET' && req.method !== 'POST')
         return sendJson(res, 405, { error: 'method_not_allowed' });
       // 本機的資料夾結構與其他 repo 只給這台電腦看（`vite --host` 時區網裡的裝置只看得到預設 repo）

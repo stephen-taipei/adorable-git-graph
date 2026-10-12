@@ -8,6 +8,7 @@ export interface ToolbarProps {
   branches: readonly GraphBranch[];
   /** 每個 branch 比 default 多幾個 commit（default 本身不放） */
   ahead: ReadonlyMap<string, number>;
+  aheadKnown?: boolean;
   commitsOn: ReadonlyMap<string, number>;
   defaultName?: string;
   query: string;
@@ -27,6 +28,7 @@ export function Toolbar({
   t,
   branches,
   ahead,
+  aheadKnown = false,
   commitsOn,
   defaultName,
   query,
@@ -117,7 +119,7 @@ export function Toolbar({
       {branches.length > 0 && (
         <div className="agg-branches" role="group" aria-label={t.branchFilterLabel}>
           {branches.map((b) => {
-            const n = ahead.get(b.name) ?? 0;
+            const n = ahead.get(b.name);
             const pressed = focusBranch === b.name;
             return (
               <button
@@ -132,14 +134,14 @@ export function Toolbar({
                   b.name,
                   b.sha.slice(0, 7),
                   commitsOn.get(b.name) ?? 0,
-                  n,
+                  n ?? 0,
                   defaultName ?? '',
-                )}`}
+                )}${aheadKnown ? '' : '\nAhead: unknown (use source diagnostics)'}`}
               >
                 {b.isDefault ? '★ ' : ''}
                 {b.remote && <CloudIcon />}
                 <span className="agg-branch-name">{b.name}</span>
-                {n > 0 && <small>↑{n}</small>}
+                {aheadKnown && n !== undefined && n > 0 && <small>↑{n}</small>}
               </button>
             );
           })}

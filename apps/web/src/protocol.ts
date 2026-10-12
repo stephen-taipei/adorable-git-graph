@@ -17,6 +17,8 @@ export type SnapshotErrorCode = 'missing_dir' | 'not_git' | 'no_git' | 'unsafe_r
 export const HMR_EVENT = 'agg:git-snapshot';
 /** `GET ?repo=<id>`：某個本機 repo 的快照（省略 repo = 預設 repo）。只有 dev server 有。 */
 export const SNAPSHOT_ENDPOINT = '/__agg/git-snapshot';
+/** POST JSON; read-only, same-origin AND loopback for all repositories. */
+export const DIAGNOSTICS_ENDPOINT = '/__agg/diagnostics';
 /** `GET`：dev server 掃描到、可以選擇的本機 repo 清單。只有 dev server 有。 */
 export const REPOS_ENDPOINT = '/__agg/repos';
 
@@ -52,4 +54,12 @@ export interface SnapshotEvent {
 
 /** 比較用：忽略每次讀取都會變的時間戳，只看內容有沒有變。 */
 export const snapshotKey = (s: GitSnapshot): string =>
-  JSON.stringify({ ...s, generatedAt: 0, graph: s.graph && { ...s.graph, fetchedAt: 0 } });
+  JSON.stringify({
+    ...s,
+    generatedAt: 0,
+    graph: s.graph && {
+      ...s.graph,
+      fetchedAt: 0,
+      coverage: s.graph.coverage && { ...s.graph.coverage, observedAt: 0 },
+    },
+  });

@@ -40,6 +40,7 @@ export function findFirefox() {
  * 用虛擬 X server（Xvfb）提供 GLX + Mesa 軟體繪圖，--headless 照開也能跑 WebGL 2。已有 DISPLAY（例如 xvfb-run）就沿用。
  */
 export function startXvfb() {
+  if (process.platform !== 'linux') return Promise.resolve({ display: undefined, stop() {} });
   if (process.env.DISPLAY) return Promise.resolve({ display: process.env.DISPLAY, stop() {} });
   return new Promise((resolve, reject) => {
     const p = spawn(
@@ -87,7 +88,8 @@ export async function launchFirefox({ firefox, extDir, geckoId, uuid, display, p
     executablePath: firefox,
     headless: true,
     // 必要：沒有它 BiDi 不允許操作 moz-extension:// 頁面（"System access is required"），也沒有瀏覽器 UI（chrome）範圍可以按工具列按鈕
-    args: ['--remote-allow-system-access'],
+    // Do not delegate to an already-open user Firefox instance on macOS.
+    args: ['--no-remote', '--new-instance', '--remote-allow-system-access'],
     env: { ...process.env, ...(display ? { DISPLAY: display } : {}) },
     extraPrefsFirefox: {
       'extensions.webextensions.uuids': JSON.stringify({ [geckoId]: uuid }),

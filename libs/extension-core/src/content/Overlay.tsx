@@ -9,8 +9,16 @@ function githubTheme(): 'day' | 'night' | 'auto' {
   return mode === 'dark' ? 'night' : mode === 'light' ? 'day' : 'auto';
 }
 
-export function Overlay({ repo, onClose }: { repo: RepoRef; onClose: () => void }) {
-  const { state, refresh } = useGraph(repo);
+export function Overlay({
+  repo,
+  onClose,
+  epoch = 0,
+}: {
+  repo: RepoRef;
+  onClose: () => void;
+  epoch?: number;
+}) {
+  const { state, refresh, diagnostics, diagnosticGeneration } = useGraph(repo, epoch);
   const panelRef = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
 
@@ -52,7 +60,8 @@ export function Overlay({ repo, onClose }: { repo: RepoRef; onClose: () => void 
     const panel = panelRef.current;
     if (!panel) return;
     const scope = panel.getRootNode() as Document | ShadowRoot;
-    if (!scope.activeElement || !panel.contains(scope.activeElement)) panel.focus();
+    if (!scope.activeElement || !panel.contains(scope.activeElement))
+      (panel.querySelector<HTMLElement>('.agg-root[tabindex]') ?? panel).focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.composedPath().includes(panel)) return; // overlay 內部：由 React / viewer 的處理器負責
@@ -99,6 +108,20 @@ export function Overlay({ repo, onClose }: { repo: RepoRef; onClose: () => void 
           <GitGraphViewer
             title={`${repo.owner}/${repo.repo}`}
             state={state}
+            diagnostics={diagnostics}
+            sourceKey={`github:${repo.owner}/${repo.repo}`}
+            viewerStateKey={
+              diagnosticGeneration
+                ? JSON.stringify([
+                    repo.owner.toLowerCase(),
+                    repo.repo.toLowerCase(),
+                    repo.branchHint ?? '',
+                    repo.commit ?? '',
+                    repo.pullRequest ?? null,
+                    diagnosticGeneration,
+                  ])
+                : undefined
+            }
             theme={githubTheme()}
             onRefresh={refresh}
             onClose={onClose}

@@ -5,6 +5,8 @@ export interface RepoRef {
   repo: string;
   /** `/tree/<branch>/…` 之後的路徑；branch 名可能含 `/`，由 graph-core 解析。 */
   branchHint?: string;
+  commit?: string;
+  pullRequest?: number;
 }
 
 /** github.com 的第一層路徑，不是 user / org。 */
@@ -82,5 +84,19 @@ export function parseRepoPath(pathname: string): RepoRef | null {
       branchHint = undefined;
     }
   }
-  return { owner, repo, branchHint };
+  const commit = seg[2] === 'commit' && /^[a-f0-9]{7,64}$/i.test(seg[3] ?? '') ? seg[3] : undefined;
+  const pullRequest =
+    seg[2] === 'pull' &&
+    /^\d+$/.test(seg[3] ?? '') &&
+    Number.isSafeInteger(Number(seg[3])) &&
+    Number(seg[3]) > 0
+      ? Number(seg[3])
+      : undefined;
+  return {
+    owner,
+    repo,
+    branchHint,
+    ...(commit ? { commit } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
+  };
 }

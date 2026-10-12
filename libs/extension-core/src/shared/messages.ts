@@ -1,10 +1,19 @@
-import type { GraphData } from '@adorable/graph-core';
+import type { DiagnosticRequest, GraphData } from '@adorable/graph-core';
 
 export type BgRequest =
   | { type: 'fetch-graph'; owner: string; repo: string; branchHint?: string; force?: boolean }
   | { type: 'open-options' }
   | { type: 'rate-limit' }
-  | { type: 'clear-cache' };
+  | { type: 'clear-cache' }
+  | {
+      type: 'diagnostic';
+      owner: string;
+      repo: string;
+      requestId: string;
+      generation: string;
+      query: DiagnosticRequest;
+    }
+  | { type: 'diagnostic-cancel'; requestId: string };
 
 export interface BgError {
   code: string;
@@ -14,7 +23,12 @@ export interface BgError {
 
 export type BgResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: BgError };
 
-export type FetchGraphResponse = BgResponse<{ graph: GraphData; fromCache: boolean }>;
+export type FetchGraphResponse = BgResponse<{
+  graph: GraphData;
+  fromCache: boolean;
+  /** Opaque background lifetime/auth scope; never a token or its hash. */
+  diagnosticGeneration: string;
+}>;
 export type RateLimitResponse = BgResponse<{
   limit: number;
   remaining: number;
@@ -22,7 +36,7 @@ export type RateLimitResponse = BgResponse<{
   authenticated: boolean;
 }>;
 
-export type TabCommand = { type: 'toggle' };
+export type TabCommand = { type: 'toggle' } | { type: 'data-invalidated' };
 
 /** content script / options page → background 的簡易 RPC。 */
 export function sendToBackground<R extends BgResponse>(req: BgRequest): Promise<R> {

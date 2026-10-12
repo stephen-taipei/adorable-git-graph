@@ -1,5 +1,12 @@
-import { GitHubError, fetchGitHubGraph } from '@adorable/graph-core';
-import type { GraphData } from '@adorable/graph-core';
+import {
+  GitHubError,
+  cacheDiagnostics,
+  createGitHubDiagnostics,
+  fetchGitHubGraph,
+  isDiagnosticRequest,
+  isValidRepoSegment,
+} from '@adorable/graph-core';
+import type { DiagnosticAdapter, GraphData } from '@adorable/graph-core';
 import type {
   BgError,
   BgRequest,
@@ -8,7 +15,7 @@ import type {
   RateLimitResponse,
   TabCommand,
 } from '../shared/messages';
-import { SETTINGS_KEY, loadSettings } from '../shared/settings';
+import { SETTINGS_KEY, loadSettings, type Settings } from '../shared/settings';
 
 /**
  * GitHub への要求にかける時間の上限。Firefox の background は event page で、アイドルが 30 秒続くと停止する。
@@ -22,15 +29,137 @@ const CACHE_MAX_ENTRIES = 12;
 
 interface CacheEntry {
   savedAt: number;
+  credentialScope: string;
   graph: GraphData;
 }
 
 const inflight = new Map<string, Promise<FetchGraphResponse>>();
+const diagnosticRequests = new Map<string, AbortController>();
+const diagnosticAdapters = new Map<string, DiagnosticAdapter>();
+const recoveryNotifications = new Map<number, { generation: string; promise: Promise<void> }>();
+let settingsGeneration = 0;
+let diagnosticGeneration = crypto.randomUUID();
+let settingsSnapshot: Settings | undefined;
+let settingsReads: Promise<void> = Promise.resolve();
+let cacheInvalidation: Promise<void> = Promise.resolve();
+function invalidateCache(): Promise<void> {
+  cacheInvalidation = cacheInvalidation.catch(() => {}).then(clearCache);
+  return cacheInvalidation;
+}
+class SourceChangedError extends Error {}
+function assertGeneration(generation: number, tag?: string) {
+  if (generation !== settingsGeneration || (tag !== undefined && tag !== diagnosticGeneration))
+    throw new SourceChangedError();
+}
+function withinRequest<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort);
+      reject(
+        signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError'
+          ? signal.reason
+          : new DOMException('Aborted', 'AbortError'),
+      );
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
+  });
+}
+function notifyInvalidated(tabId: number): Promise<void> {
+  const generation = diagnosticGeneration;
+  const prior = recoveryNotifications.get(tabId);
+  if (prior?.generation === generation) return prior.promise;
+  const entry = {
+    generation,
+    promise: Promise.resolve()
+      .then(() => chrome.tabs.sendMessage(tabId, { type: 'data-invalidated' } satisfies TabCommand))
+      .then(() => undefined),
+  };
+  recoveryNotifications.set(tabId, entry);
+  void entry.promise.catch(() => {
+    if (recoveryNotifications.get(tabId) === entry) recoveryNotifications.delete(tabId);
+  });
+  return entry.promise;
+}
+function rotateGeneration() {
+  settingsGeneration++;
+  diagnosticGeneration = crypto.randomUUID();
+  diagnosticRequests.forEach((controller) => controller.abort());
+  diagnosticRequests.clear();
+  diagnosticAdapters.clear();
+  recoveryNotifications.clear();
+  inflight.clear();
+  void invalidateCache().catch(() => {});
+  // Delivery and cache removal are independent; slow storage must not preserve old adapters.
+  void chrome.tabs
+    .query({})
+    .then((tabs) =>
+      Promise.allSettled(
+        tabs.filter((tab) => tab.id != null).map((tab) => notifyInvalidated(tab.id!)),
+      ),
+    )
+    .catch(() => {});
+}
+function readScopedSettings() {
+  // Serialize only settings reads/adoption. An older read cannot overwrite a newer snapshot.
+  const pending = settingsReads.then(async () => {
+    const before = settingsGeneration;
+    const settings = await loadSettings();
+    assertGeneration(before);
+    if (settingsSnapshot && JSON.stringify(settingsSnapshot) !== JSON.stringify(settings))
+      rotateGeneration();
+    settingsSnapshot = settings;
+    return { settings, generation: settingsGeneration, tag: diagnosticGeneration };
+  });
+  settingsReads = pending.then(
+    () => {},
+    () => {},
+  );
+  return pending;
+}
+function diagnosticsFor(owner: string, repo: string, token: string): DiagnosticAdapter {
+  const key = `${diagnosticGeneration}:${owner}/${repo}`.toLowerCase();
+  let adapter = diagnosticAdapters.get(key);
+  if (!adapter) {
+    adapter = cacheDiagnostics(
+      createGitHubDiagnostics(owner, repo, {
+        token: token || undefined,
+        apiBase: __AGG_API_BASE__,
+      }),
+    );
+  }
+  diagnosticAdapters.delete(key);
+  diagnosticAdapters.set(key, adapter);
+  while (diagnosticAdapters.size > CACHE_MAX_ENTRIES)
+    diagnosticAdapters.delete(diagnosticAdapters.keys().next().value!);
+  return adapter;
+}
+async function credentialScope(token: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, '0')).join('');
+}
 
 function toError(err: unknown): BgError {
+  if (err instanceof SourceChangedError)
+    return { code: 'source_changed', message: 'Settings changed; reload the graph' };
+  if (err instanceof DOMException && err.name === 'TimeoutError')
+    return { code: 'network', message: 'Query timed out' };
   if (err instanceof GitHubError)
     return { code: err.code, message: err.message, resetAt: err.resetAt };
-  return { code: 'unknown', message: err instanceof Error ? err.message : String(err) };
+  return { code: 'unknown', message: 'Query unavailable' };
 }
 
 async function pruneCache() {
@@ -49,36 +178,113 @@ async function clearCache() {
   if (keys.length) await chrome.storage.local.remove(keys);
 }
 
-async function fetchGraph(
-  req: Extract<BgRequest, { type: 'fetch-graph' }>,
+type GraphRequest = Extract<BgRequest, { type: 'fetch-graph' }>;
+type SettingsScope = Awaited<ReturnType<typeof readScopedSettings>>;
+async function validateSettingsScope(scoped: SettingsScope, signal: AbortSignal): Promise<void> {
+  assertGeneration(scoped.generation, scoped.tag);
+  await withinRequest(cacheInvalidation, signal);
+  assertGeneration(scoped.generation, scoped.tag);
+  await withinRequest(readScopedSettings(), signal);
+  assertGeneration(scoped.generation, scoped.tag);
+  await withinRequest(cacheInvalidation, signal);
+  assertGeneration(scoped.generation, scoped.tag);
+  signal.throwIfAborted();
+}
+async function fetchGraphScoped(
+  req: GraphRequest,
+  scoped: SettingsScope,
 ): Promise<FetchGraphResponse> {
-  const settings = await loadSettings();
-  const key =
-    `${CACHE_PREFIX}${req.owner}/${req.repo}#${req.branchHint ?? ''}#${settings.maxBranches}x${settings.maxCommitsPerBranch}`.toLowerCase();
-
-  if (!req.force && settings.cacheMinutes > 0) {
-    const hit = (await chrome.storage.local.get(key))[key] as CacheEntry | undefined;
-    if (hit && Date.now() - hit.savedAt < settings.cacheMinutes * 60_000) {
-      return { ok: true, data: { graph: hit.graph, fromCache: true } };
-    }
-  }
-
   try {
-    const graph = await fetchGitHubGraph(req.owner, req.repo, {
-      token: settings.token || undefined,
-      apiBase: __AGG_API_BASE__,
-      branchHint: req.branchHint,
-      maxBranches: settings.maxBranches,
-      maxCommitsPerBranch: settings.maxCommitsPerBranch,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (settings.cacheMinutes > 0) {
-      await chrome.storage.local.set({
-        [key]: { savedAt: Date.now(), graph } satisfies CacheEntry,
-      });
-      await pruneCache();
+    // A shared producer owns its deadline; an individual consumer cannot cancel it.
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const { settings, generation, tag } = scoped;
+    await withinRequest(cacheInvalidation, signal);
+    assertGeneration(generation, tag);
+    const scope = await withinRequest(credentialScope(settings.token), signal);
+    assertGeneration(generation, tag);
+    const key = (
+      CACHE_PREFIX +
+      req.owner +
+      '/' +
+      req.repo +
+      '#' +
+      (req.branchHint ?? '') +
+      '#' +
+      settings.maxBranches +
+      'x' +
+      settings.maxCommitsPerBranch
+    ).toLowerCase();
+    if (!req.force && settings.cacheMinutes > 0) {
+      const hit = (await withinRequest(chrome.storage.local.get(key), signal))[key] as
+        CacheEntry | undefined;
+      assertGeneration(generation, tag);
+      if (
+        hit &&
+        hit.credentialScope === scope &&
+        Date.now() - hit.savedAt < settings.cacheMinutes * 60_000
+      ) {
+        await validateSettingsScope(scoped, signal);
+        return { ok: true, data: { graph: hit.graph, fromCache: true, diagnosticGeneration: tag } };
+      }
     }
-    return { ok: true, data: { graph, fromCache: false } };
+    const graph = await withinRequest(
+      fetchGitHubGraph(req.owner, req.repo, {
+        token: settings.token || undefined,
+        apiBase: __AGG_API_BASE__,
+        branchHint: req.branchHint,
+        maxBranches: settings.maxBranches,
+        maxCommitsPerBranch: settings.maxCommitsPerBranch,
+        signal,
+      }),
+      signal,
+    );
+    await validateSettingsScope(scoped, signal);
+    if (settings.cacheMinutes > 0) {
+      try {
+        // Await the actual write so a late stale write cannot land after its cleanup.
+        await chrome.storage.local.set({
+          [key]: { savedAt: Date.now(), graph, credentialScope: scope } satisfies CacheEntry,
+        });
+        await pruneCache();
+        await validateSettingsScope(scoped, signal);
+      } catch (err) {
+        // A previously failed clear stays failed until an explicit retry/setting change.
+        await cacheInvalidation;
+        await invalidateCache();
+        throw err;
+      }
+    }
+    return { ok: true, data: { graph, fromCache: false, diagnosticGeneration: tag } };
+  } catch (err) {
+    return { ok: false, error: toError(err) };
+  }
+}
+async function fetchGraph(req: GraphRequest): Promise<FetchGraphResponse> {
+  try {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    await withinRequest(cacheInvalidation, signal);
+    const scoped = await withinRequest(readScopedSettings(), signal);
+    await withinRequest(cacheInvalidation, signal);
+    assertGeneration(scoped.generation, scoped.tag);
+    signal.throwIfAborted();
+    const key = JSON.stringify([
+      scoped.generation,
+      scoped.tag,
+      req.owner,
+      req.repo,
+      req.branchHint ?? '',
+      Boolean(req.force),
+    ]);
+    let pending = inflight.get(key);
+    if (!pending) {
+      pending = fetchGraphScoped(req, scoped).finally(() => {
+        if (inflight.get(key) === pending) inflight.delete(key);
+      });
+      inflight.set(key, pending);
+    }
+    const response = await withinRequest(pending, signal);
+    await validateSettingsScope(scoped, signal);
+    return response;
   } catch (err) {
     return { ok: false, error: toError(err) };
   }
@@ -117,21 +323,117 @@ chrome.runtime.onMessage.addListener(
     if (sender.id !== chrome.runtime.id) return false;
     const req = raw as BgRequest | undefined;
     switch (req?.type) {
-      case 'fetch-graph': {
-        const key = `${req.owner}/${req.repo}#${req.branchHint ?? ''}#${req.force ? 'f' : ''}`;
-        let p = inflight.get(key);
-        if (!p) {
-          p = fetchGraph(req).finally(() => inflight.delete(key));
-          inflight.set(key, p);
+      case 'diagnostic-cancel': {
+        if (typeof req.requestId === 'string')
+          diagnosticRequests.get(`${sender.tab?.id ?? 'options'}:${req.requestId}`)?.abort();
+        sendResponse({ ok: true, data: null });
+        return false;
+      }
+      case 'diagnostic': {
+        if (
+          typeof req.owner !== 'string' ||
+          typeof req.repo !== 'string' ||
+          !isValidRepoSegment(req.owner) ||
+          !isValidRepoSegment(req.repo) ||
+          typeof req.requestId !== 'string' ||
+          !/^[a-z0-9-]{1,64}$/i.test(req.requestId) ||
+          !isDiagnosticRequest(req.query) ||
+          diagnosticRequests.size >= 24
+        ) {
+          sendResponse({
+            ok: false,
+            error: { code: 'invalid_repo', message: 'Invalid diagnostic request' },
+          });
+          return false;
         }
-        void p.then(sendResponse);
+        if (typeof req.generation !== 'string' || req.generation !== diagnosticGeneration) {
+          sendResponse({ ok: false, error: toError(new SourceChangedError()) });
+          // Legacy content must reload its page; do not create a refresh loop for missing tags.
+          if (typeof req.generation === 'string' && sender.tab?.id != null)
+            void notifyInvalidated(sender.tab.id).catch(() => {});
+          return false;
+        }
+        const key = `${sender.tab?.id ?? 'options'}:${req.requestId}`;
+        diagnosticRequests.get(key)?.abort();
+        const controller = new AbortController(),
+          generation = settingsGeneration;
+        diagnosticRequests.set(key, controller);
+        void (async () => {
+          try {
+            const signal = AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            ]);
+            await withinRequest(cacheInvalidation, signal);
+            const scoped = await withinRequest(readScopedSettings(), signal);
+            assertGeneration(generation, req.generation);
+            await withinRequest(cacheInvalidation, signal);
+            assertGeneration(scoped.generation, req.generation);
+            signal.throwIfAborted();
+            const adapter = diagnosticsFor(req.owner, req.repo, scoped.settings.token);
+            const query = req.query;
+            const work =
+              query.operation === 'compare'
+                ? adapter.compare(query.base, query.head, signal)
+                : query.operation === 'changes'
+                  ? adapter.changes(query.sha, query.parent, signal, query.commitRepo)
+                  : query.operation === 'patch'
+                    ? adapter.patch(
+                        query.base,
+                        query.head,
+                        query.path,
+                        query.previousPath,
+                        signal,
+                        query.headRepo,
+                      )
+                    : adapter.pullRequest!(query.number, signal);
+            const data = await withinRequest<Awaited<typeof work>>(work, signal);
+            await validateSettingsScope(scoped, signal);
+            assertGeneration(generation, req.generation);
+            signal.throwIfAborted();
+            sendResponse({ ok: true, data });
+          } catch (e) {
+            sendResponse({
+              ok: false,
+              error: toError(
+                generation !== settingsGeneration || req.generation !== diagnosticGeneration
+                  ? new SourceChangedError()
+                  : e,
+              ),
+            });
+          } finally {
+            controller.abort();
+            if (diagnosticRequests.get(key) === controller) diagnosticRequests.delete(key);
+          }
+        })();
+        return true;
+      }
+      case 'fetch-graph': {
+        if (
+          typeof req.owner !== 'string' ||
+          typeof req.repo !== 'string' ||
+          !isValidRepoSegment(req.owner) ||
+          !isValidRepoSegment(req.repo)
+        ) {
+          sendResponse({
+            ok: false,
+            error: { code: 'invalid_repo', message: 'Invalid repository' },
+          });
+          return false;
+        }
+        void fetchGraph(req).then(sendResponse);
         return true;
       }
       case 'rate-limit':
         void rateLimit().then(sendResponse);
         return true;
       case 'clear-cache':
-        void clearCache().then(() => sendResponse({ ok: true, data: null }));
+        diagnosticAdapters.clear();
+        void invalidateCache().then(
+          () => sendResponse({ ok: true, data: null }),
+          () =>
+            sendResponse({ ok: false, error: { code: 'unknown', message: 'Cache unavailable' } }),
+        );
         return true;
       case 'open-options':
         void chrome.runtime.openOptionsPage();
@@ -145,7 +447,10 @@ chrome.runtime.onMessage.addListener(
 
 // token 或抓取範圍變更 → 舊 cache 可能含私有資料 / 不符新設定，直接清掉。
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && SETTINGS_KEY in changes) void clearCache();
+  if (area === 'local' && SETTINGS_KEY in changes) {
+    // Event payloads may be delayed; invalidate immediately, then read current storage in order.
+    rotateGeneration();
+  }
 });
 
 // 點工具列圖示 → 切換目前 GitHub 分頁上的圖。

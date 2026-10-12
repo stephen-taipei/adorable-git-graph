@@ -34,6 +34,14 @@ export const SPECS = [
 const byId = new Map(
   SPECS.map((s) => [s[0], { id: s[0], parents: s[1], msg: s[2], author: s[3], at: T0 + s[4] * H }]),
 );
+export const OUTSIDE_SHA = sha('outside');
+byId.set('outside', {
+  id: 'outside',
+  parents: ['y2'],
+  msg: 'feat: outside graph window',
+  author: 'ben',
+  at: T0 + 97 * H,
+});
 const HEADS = { main: 'm13', 'feat/dark-mode': 'y2', 'release/v0.1': 'r2', 'a-old': 'm1' };
 
 const ancestors = (id) => {
@@ -60,7 +68,7 @@ const apiCommit = (c, base) => ({
   author: { login: c.author, avatar_url: `${base}/avatar/${c.author}.svg` },
 });
 
-export const seen = { auth: [], paths: [] };
+export const seen = { auth: [], paths: [], pending: 0 };
 /**
  * 每個 API 回應前多等幾毫秒（預設 0）。快到 React 把「開始重新整理」和「完成」合併成同一次 render 時，
  * 轉圈根本不會出現；要驗證轉圈的步驟把這個調高，結束後記得歸零。
@@ -70,6 +78,20 @@ export const latency = { ms: 0 };
 export function startMock() {
   return new Promise((ok) => {
     const server = createServer((req, res) => {
+      // Record arrival, not delayed response time: cancelled old requests may finish later.
+      const url = new URL(req.url, 'http://x');
+      seen.paths.push(url.pathname + url.search);
+      if (req.headers.authorization) seen.auth.push(req.headers.authorization);
+      seen.pending++;
+      let settled = false;
+      const settle = () => {
+        if (!settled) {
+          settled = true;
+          seen.pending--;
+        }
+      };
+      res.once('finish', settle);
+      res.once('close', settle);
       if (latency.ms > 0 && !req.url.startsWith('/avatar/')) {
         setTimeout(() => handle(req, res), latency.ms);
         return;
@@ -79,8 +101,6 @@ export function startMock() {
     function handle(req, res) {
       const url = new URL(req.url, 'http://x');
       const base = `http://127.0.0.1:${server.address().port}`;
-      seen.paths.push(url.pathname + url.search);
-      if (req.headers.authorization) seen.auth.push(req.headers.authorization);
       // 與 api.github.com 一致的 CORS：網頁（非 extension）呼叫時需要，且必須 expose rate limit 標頭
       const cors = {
         'access-control-allow-origin': '*',
@@ -121,8 +141,76 @@ export function startMock() {
           },
         );
       }
-      const m = /^\/repos\/demo\/adorable-git-graph(\/.*)?$/.exec(p);
+      const m = /^\/repos\/(?:demo|fork)\/adorable-git-graph(\/.*)?$/.exec(p);
       if (!m) return json(404, { message: 'Not Found' });
+      const commitPath = /^\/commits\/(.+)$/.exec(m[1] ?? '');
+      if (commitPath) {
+        const ref = decodeURIComponent(commitPath[1]);
+        const id =
+          HEADS[ref] ?? [...byId.keys()].find((id) => sha(id) === ref || sha(id).startsWith(ref));
+        if (!id) return json(404, { message: 'Not Found' });
+        return json(200, {
+          ...apiCommit(byId.get(id), base),
+          files: [
+            {
+              filename: 'diagnostic.txt',
+              status: 'modified',
+              additions: 1,
+              deletions: 0,
+              patch: '@@ -0,0 +1 @@\n+diagnostic change',
+            },
+          ],
+        });
+      }
+      const comparePath = /^\/compare\/(.+)\.\.\.(.+)$/.exec(m[1] ?? '');
+      if (comparePath) {
+        const resolveId = (value) =>
+          [...byId.keys()].find((id) => sha(id) === decodeURIComponent(value).split(':').at(-1));
+        const baseId = resolveId(comparePath[1]),
+          headId = resolveId(comparePath[2]);
+        if (!baseId || !headId) return json(404, { message: 'Not Found' });
+        const a = ancestors(baseId),
+          b = ancestors(headId),
+          as = new Set(a.map((c) => c.id)),
+          bs = new Set(b.map((c) => c.id));
+        const common = b.find((c) => as.has(c.id));
+        const unique = b.filter((c) => !as.has(c.id));
+        const page = Number(url.searchParams.get('page') ?? 1);
+        return json(200, {
+          base_commit: { sha: sha(baseId) },
+          merge_base_commit: common ? { sha: sha(common.id) } : null,
+          ahead_by: unique.length,
+          behind_by: a.filter((c) => !bs.has(c.id)).length,
+          commits: unique.slice((page - 1) * 100, page * 100).map((c) => apiCommit(c, base)),
+          files:
+            baseId === headId
+              ? []
+              : [
+                  {
+                    filename: 'diagnostic.txt',
+                    status: 'modified',
+                    additions: 1,
+                    deletions: 0,
+                    patch: '@@ -0,0 +1 @@\n+diagnostic change',
+                  },
+                ],
+        });
+      }
+      if (m[1] === '/pulls/7')
+        return json(200, {
+          number: 7,
+          title: 'Diagnostic PR',
+          state: 'open',
+          draft: true,
+          merged: false,
+          merged_at: null,
+          base: { ref: 'main', sha: sha('m13'), repo: { full_name: 'demo/adorable-git-graph' } },
+          head: {
+            ref: 'fork/topic',
+            sha: OUTSIDE_SHA,
+            repo: { full_name: 'fork/adorable-git-graph' },
+          },
+        });
       switch (m[1]) {
         case undefined:
           return json(200, {
@@ -144,7 +232,8 @@ export function startMock() {
             { name: 'v0.0.1', commit: { sha: sha('m3') } },
           ]);
         case '/commits': {
-          const head = HEADS[url.searchParams.get('sha')];
+          const ref = url.searchParams.get('sha');
+          const head = HEADS[ref] ?? SPECS.find((s) => sha(s[0]) === ref)?.[0];
           if (!head) return json(404, { message: 'No commit found' });
           const per = Number(url.searchParams.get('per_page') ?? 30);
           return json(

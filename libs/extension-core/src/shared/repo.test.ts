@@ -38,3 +38,10 @@ describe('parseRepoPath', () => {
     expect(parseRepoPath('/o/<script>')).toBeNull();
   });
 });
+
+it('preserves current commit and PR context on GitHub SPA routes', () => {
+  const commit = 'a'.repeat(40);
+  expect(parseRepoPath(`/o/r/commit/${commit}`)?.commit).toBe(commit);
+  expect(parseRepoPath('/o/r/pull/7/files')?.pullRequest).toBe(7);
+  expect(parseRepoPath('/o/r/pull/-1')?.pullRequest).toBeUndefined();
+});

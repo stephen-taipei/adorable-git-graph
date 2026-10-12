@@ -16,7 +16,7 @@
     "e2e": "nx run-many -t e2e --parallel=1",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "start": "nx run @adorable/web:start"
+    "start": "node tools/start.mjs"
   },
   "devDependencies": {
     "nx": "^23.2.1",

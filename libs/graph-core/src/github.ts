@@ -1,4 +1,5 @@
 import type { CommitInput, GraphData, RefInput } from './types.ts';
+import { coverage } from './diagnostics.ts';
 
 export type GitHubErrorCode =
   | 'invalid_repo'
@@ -162,6 +163,7 @@ export async function fetchGitHubGraph(
   const defaultBranch = repoInfo.default_branch;
 
   // tags 失敗不致命
+  let tagsUnavailable = false;
   const [branches, pulls, tags] = await Promise.all([
     get<ApiBranch[]>(`${repoPath}/branches`, { per_page: 100 }),
     get<ApiPull[]>(`${repoPath}/pulls`, {
@@ -170,7 +172,11 @@ export async function fetchGitHubGraph(
       direction: 'desc',
       per_page: 10,
     }).catch(() => [] as ApiPull[]),
-    get<ApiTag[]>(`${repoPath}/tags`, { per_page: 30 }).catch(() => [] as ApiTag[]),
+    get<ApiTag[]>(`${repoPath}/tags`, { per_page: 30 }).catch((err) => {
+      if (opts.signal?.aborted) throw err;
+      tagsUnavailable = true;
+      return [] as ApiTag[];
+    }),
   ]);
 
   const headBySha = new Map(branches.map((b) => [b.name, b.commit.sha]));
@@ -188,7 +194,7 @@ export async function fetchGitHubGraph(
 
   const results = await Promise.all(
     picked.map((name) =>
-      get<ApiCommit[]>(`${repoPath}/commits`, { sha: name, per_page: perBranch }),
+      get<ApiCommit[]>(`${repoPath}/commits`, { sha: headBySha.get(name)!, per_page: perBranch }),
     ),
   );
 
@@ -208,8 +214,32 @@ export async function fetchGitHubGraph(
   }
 
   const truncated = [...commits.values()].some((c) => c.parents.some((p) => !commits.has(p)));
+  const refReasons = [
+    ...(tagsUnavailable ? ['tags_unavailable'] : []),
+    ...(picked.length < branches.length ? ['branch_selection'] : []),
+    ...(branches.length >= 100 ? ['branch_page_limit'] : []),
+    ...(tags.length >= 30 ? ['tag_page_limit'] : []),
+    ...(tags.some((t) => !commits.has(t.commit.sha)) ? ['tags_outside_history'] : []),
+  ];
+  const observedAt = Date.now();
 
   return {
+    coverage: {
+      source: 'github',
+      observedAt,
+      refs: coverage(
+        refReasons.length ? 'partial' : 'complete',
+        refReasons,
+        refs.length,
+        refReasons.length ? undefined : refs.length,
+      ),
+      commits: coverage(
+        truncated ? 'partial' : 'complete',
+        truncated ? ['history_limit'] : [],
+        commits.size,
+        truncated ? undefined : commits.size,
+      ),
+    },
     repo: {
       owner: repoInfo.owner?.login ?? owner,
       name: repoInfo.name ?? repo,
@@ -219,6 +249,6 @@ export async function fetchGitHubGraph(
     commits: [...commits.values()],
     refs,
     truncated,
-    fetchedAt: Date.now(),
+    fetchedAt: observedAt,
   };
 }

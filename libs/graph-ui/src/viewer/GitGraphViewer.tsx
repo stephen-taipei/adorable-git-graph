@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode, SetStateAction } from 'react';
 import {
   aheadCount,
   branchesContaining,
   buildReachability,
   computeStats,
+  isFullSha,
   matchesQuery,
 } from '@adorable/graph-core';
-import type { GraphLayout, GraphNode } from '@adorable/graph-core';
+import type { DiagnosticAdapter, GraphLayout, GraphNode } from '@adorable/graph-core';
 import { detectLocale, formatDuration, formatRelative, getMessages } from '../i18n';
 import type { Locale } from '../i18n';
 import {
@@ -24,6 +25,8 @@ import { GitGraphCanvas } from './GitGraphCanvas';
 import type { GitGraphCanvasHandle } from './GitGraphCanvas';
 import { Mascot } from './Mascot';
 import { Toolbar } from './Toolbar';
+import { CoverageNotice, DiagnosticsPanel } from './DiagnosticsPanel';
+import type { CommitInspection } from './DiagnosticsPanel';
 import { useElementSize, usePrefersDark, usePrefersReducedMotion } from './hooks';
 import { GearIcon, PlayIcon, RefreshIcon, CloseIcon, TopIcon } from './icons';
 
@@ -54,6 +57,36 @@ export interface GitGraphViewerProps {
   headerExtra?: ReactNode;
   /** 資料來源的識別（例如 `local` / `github`）。同名 repo 換來源時不會被當成「剛 commit 了一筆」的增量更新。 */
   sourceKey?: string;
+  /** Opaque repo/URL/credential scope for restoring inspection metadata after close/reopen. */
+  viewerStateKey?: string;
+  diagnostics?: DiagnosticAdapter;
+}
+
+function savedInspection(
+  key?: string,
+): { inspection?: CommitInspection; open: boolean } | undefined {
+  if (!key) return;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`agg:inspection:${key}`) ?? 'null');
+    if (!saved || saved.version !== 1 || typeof saved.open !== 'boolean') return;
+    const value = saved.inspection;
+    if (value === undefined) return { open: saved.open };
+    if (
+      !value ||
+      !isFullSha(value.sha) ||
+      (value.repo !== undefined &&
+        (typeof value.repo !== 'string' ||
+          value.repo.length > 256 ||
+          !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repo)))
+    )
+      return;
+    return {
+      open: saved.open,
+      inspection: { sha: value.sha, ...(value.repo ? { repo: value.repo } : {}) },
+    };
+  } catch {
+    /* optional metadata storage */
+  }
 }
 
 function IconButton({
@@ -104,11 +137,21 @@ export function GitGraphViewer({
   onOpenCommit,
   headerExtra,
   sourceKey,
+  viewerStateKey,
+  diagnostics,
 }: GitGraphViewerProps) {
   const loc = locale ?? detectLocale();
   const t = getMessages(loc);
   const prefersDark = usePrefersDark();
-  const reducedMotion = usePrefersReducedMotion();
+  const systemReducedMotion = usePrefersReducedMotion();
+  const [animationOff, setAnimationOff] = useState(() => {
+    try {
+      return localStorage.getItem('agg:animation-off') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const reducedMotion = systemReducedMotion || animationOff;
   const sceneTheme = theme === 'auto' ? (prefersDark ? 'night' : 'day') : theme;
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -119,7 +162,73 @@ export function GitGraphViewer({
   const { width: rootWidth } = useElementSize(rootRef);
 
   const [webglFailed, setWebglFailed] = useState(false);
-  const [selectedSha, setSelectedSha] = useState<string | null>(null);
+  const diagnosticsScope = useMemo(() => ({}), [title, sourceKey, diagnostics, viewerStateKey]);
+  const [inspectionState, setInspectionState] = useState(() => {
+    const saved = savedInspection(viewerStateKey);
+    return {
+      scope: diagnosticsScope,
+      value: saved?.inspection,
+      initialOpen: saved?.open,
+      canRestore: !viewerStateKey && state.kind !== 'ready',
+    };
+  });
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(
+    inspectionState.initialOpen ??
+      Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest),
+  );
+  if (inspectionState.scope !== diagnosticsScope) {
+    // A freshly mounted overlay obtains its opaque generation asynchronously.
+    // Restore once before its first ready commit; active scope changes clear it.
+    const restored =
+      inspectionState.canRestore && state.kind === 'ready'
+        ? savedInspection(viewerStateKey)
+        : undefined;
+    setInspectionState({
+      scope: diagnosticsScope,
+      value: restored?.inspection,
+      initialOpen: undefined,
+      canRestore: inspectionState.canRestore && state.kind !== 'ready',
+    });
+    if (restored) setDiagnosticsOpen(restored.open);
+  }
+  const inspection = inspectionState.scope === diagnosticsScope ? inspectionState.value : undefined;
+  const setInspection = useCallback(
+    (value?: CommitInspection) => {
+      setInspectionState({
+        scope: diagnosticsScope,
+        value,
+        initialOpen: undefined,
+        canRestore: false,
+      });
+    },
+    [diagnosticsScope],
+  );
+  const [selection, setSelection] = useState<{ scope: object; sha: string | null }>(() => ({
+    scope: diagnosticsScope,
+    sha: null,
+  }));
+  const selectedSha = selection.scope === diagnosticsScope ? selection.sha : null;
+  const setSelectedSha = useCallback(
+    (value: SetStateAction<string | null>, preserveInspection = false) => {
+      if (!preserveInspection) setInspection(undefined);
+      setSelection((previous) => ({
+        scope: diagnosticsScope,
+        sha:
+          typeof value === 'function'
+            ? value(previous.scope === diagnosticsScope ? previous.sha : null)
+            : value,
+      }));
+    },
+    [diagnosticsScope, setInspection],
+  );
+  const onInspectionChange = useCallback(
+    (value?: CommitInspection) => {
+      if (value) setSelectedSha(null, true);
+      setInspection(value);
+    },
+    [setSelectedSha, setInspection],
+  );
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(-1);
   const [focusBranch, setFocusBranch] = useState<string | null>(null);
@@ -127,6 +236,48 @@ export function GitGraphViewer({
 
   const layout = state.kind === 'ready' ? state.layout : null;
   const hasRows = Boolean(layout && layout.nodes.length > 0);
+  useEffect(() => {
+    if (!viewerStateKey || !layout || inspectionState.scope !== diagnosticsScope) return;
+    try {
+      sessionStorage.setItem(
+        `agg:inspection:${viewerStateKey}`,
+        JSON.stringify({ version: 1, inspection, open: diagnosticsOpen }),
+      );
+    } catch {
+      /* store metadata only, never diagnostic contents or credentials */
+    }
+  }, [
+    viewerStateKey,
+    layout,
+    inspection,
+    diagnosticsOpen,
+    inspectionState.scope,
+    diagnosticsScope,
+  ]);
+
+  const contextKey = JSON.stringify([
+    sourceKey ?? '',
+    diagnostics?.context?.commit ?? null,
+    diagnostics?.context?.pullRequest ?? null,
+  ]);
+  const hasContext = Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest);
+  const lastContextKey = useRef(contextKey);
+  const contextNavigated = useRef(false);
+  useLayoutEffect(() => {
+    if (!layout || lastContextKey.current === contextKey) return;
+    lastContextKey.current = contextKey;
+    if (hasContext) {
+      setDiagnosticsOpen(true);
+      contextNavigated.current = true;
+      const commit = diagnostics?.context?.commit;
+      setSelectedSha(
+        commit ? (layout.nodes.find((n) => n.sha.startsWith(commit))?.sha ?? null) : null,
+      );
+      setFocusBranch(null);
+      setQuery('');
+      setCursor(-1);
+    }
+  }, [contextKey, layout, diagnostics, hasContext, setSelectedSha]);
 
   // ── 由 layout 衍生的資料（統計、可到達性、搜尋） ──────────────────────────
   const derived = useMemo(() => {
@@ -138,7 +289,7 @@ export function GitGraphViewer({
     const commitsOn = new Map<string, number>();
     for (const b of layout.branches) {
       commitsOn.set(b.name, reach.get(b.name)?.size ?? 0);
-      if (defaultName && b.name !== defaultName)
+      if (layout.coverage?.commits.status === 'complete' && defaultName && b.name !== defaultName)
         ahead.set(b.name, aheadCount(reach, b.name, defaultName));
     }
     return { bySha, reach, stats: computeStats(layout), defaultName, ahead, commitsOn };
@@ -150,7 +301,11 @@ export function GitGraphViewer({
   const metricsPrev = useRef<LogMetrics | null>(null);
   const metrics = stableMetrics(
     metricsPrev.current,
-    computeMetrics(rootWidth || 1200, layout?.laneCount ?? 1, Boolean(selectedNode)),
+    computeMetrics(
+      rootWidth || 1200,
+      layout?.laneCount ?? 1,
+      Boolean(selectedNode) && !diagnosticsOpen,
+    ),
   );
   metricsPrev.current = metrics;
 
@@ -179,7 +334,7 @@ export function GitGraphViewer({
     if (!derived) return;
     if (selectedSha && !derived.bySha.has(selectedSha)) setSelectedSha(null);
     if (focusBranch && !derived.reach.has(focusBranch)) setFocusBranch(null);
-  }, [derived, selectedSha, focusBranch]);
+  }, [derived, selectedSha, focusBranch, setSelectedSha]);
 
   // ── 捲動：保持使用者的位置、跳到某一列 ───────────────────────────────────
   const anchor = useRef<{ sha?: string; frac: number }>({ frac: 0 });
@@ -221,11 +376,43 @@ export function GitGraphViewer({
     if (lastRepo.current !== repo) {
       // 換了 repo / 來源：從頭看
       lastRepo.current = repo;
-      sc.scrollTop = 0;
+      let saved: {
+        selected?: string | null;
+        contextKey?: string;
+        viewerStateKey?: string;
+        branch?: string;
+        query?: string;
+        anchor?: string;
+        frac?: number;
+      } = {};
+      try {
+        saved = JSON.parse(sessionStorage.getItem(`agg:focus:${identity}`) ?? '{}');
+      } catch {
+        /* storage is optional */
+      }
+      const sameContext =
+        !contextNavigated.current &&
+        (viewerStateKey === undefined || saved.viewerStateKey === viewerStateKey) &&
+        (saved.contextKey === contextKey || (!hasContext && saved.contextKey === undefined));
+      if (!sameContext) saved = {};
+      const restored = saved.anchor ? layout.nodes.find((n) => n.sha === saved.anchor) : undefined;
+      sc.scrollTop = restored ? Math.max(0, topPad + (restored.row + (saved.frac ?? 0)) * rowH) : 0;
       anchor.current = { frac: 0 };
-      setSelectedSha(null);
-      setFocusBranch(null);
-      setQuery('');
+      const context = diagnostics?.context?.commit;
+      setSelectedSha(
+        sameContext && saved.selected === null
+          ? null
+          : saved.selected && layout.nodes.some((n) => n.sha === saved.selected)
+            ? saved.selected
+            : context
+              ? (layout.nodes.find((n) => n.sha.startsWith(context))?.sha ?? null)
+              : null,
+        true,
+      );
+      setFocusBranch(
+        saved.branch && layout.branches.some((b) => b.name === saved.branch) ? saved.branch : null,
+      );
+      setQuery(typeof saved.query === 'string' ? saved.query : '');
       setCursor(-1);
     } else {
       const rowOf = new Map(layout.nodes.map((n) => [n.sha, n.row]));
@@ -243,9 +430,49 @@ export function GitGraphViewer({
             });
       if (Math.abs(next - sc.scrollTop) > 0.5) sc.scrollTop = next;
     }
+    contextNavigated.current = false;
     metricsRef.current = metrics;
     rememberAnchor();
-  }, [layout, metrics, sourceKey, rememberAnchor]);
+  }, [
+    layout,
+    metrics,
+    sourceKey,
+    rememberAnchor,
+    contextKey,
+    hasContext,
+    setSelectedSha,
+    viewerStateKey,
+  ]);
+
+  useEffect(() => {
+    if (!layout || selection.scope !== diagnosticsScope) return;
+    try {
+      sessionStorage.setItem(
+        `agg:focus:${identity}`,
+        JSON.stringify({
+          contextKey,
+          viewerStateKey,
+          selected: selectedSha,
+          branch: focusBranch,
+          query,
+          anchor: anchor.current.sha,
+          frac: anchor.current.frac,
+        }),
+      );
+    } catch {
+      /* optional preference storage */
+    }
+  }, [
+    identity,
+    contextKey,
+    viewerStateKey,
+    layout,
+    selectedSha,
+    focusBranch,
+    query,
+    selection.scope,
+    diagnosticsScope,
+  ]);
 
   // 內容區與捲軸寬度（欄位標題要和列對齊）
   useLayoutEffect(() => {
@@ -280,10 +507,11 @@ export function GitGraphViewer({
   const select = useCallback(
     (sha: string | null, how: 'nearest' | 'center' | null = null) => {
       setSelectedSha(sha);
+      setSelectionRevision((value) => value + 1);
       const row = sha ? derived?.bySha.get(sha)?.row : undefined;
       if (row !== undefined && how) scrollToRow(row, how);
     },
-    [derived, scrollToRow],
+    [derived, scrollToRow, setSelectedSha],
   );
 
   // 手機的底部面板在 flex 流程裡（列表的可視高度會縮小）：面板「剛打開」時，等版面更新完再把那一列捲到看得見的地方。
@@ -314,8 +542,11 @@ export function GitGraphViewer({
   }, [selectedNode?.sha]);
 
   const onRowSelect = useCallback(
-    (sha: string) => setSelectedSha((cur) => (cur === sha ? null : sha)),
-    [],
+    (sha: string) => {
+      setSelectedSha((cur) => (cur === sha ? null : sha));
+      setSelectionRevision((value) => value + 1);
+    },
+    [setSelectedSha],
   );
 
   const moveSelection = useCallback(
@@ -457,9 +688,10 @@ export function GitGraphViewer({
       className="agg-root"
       ref={rootRef}
       data-theme={sceneTheme}
+      data-reduced-motion={reducedMotion ? '' : undefined}
       data-size={metrics.size}
       data-cols={metrics.cols}
-      data-detail={selectedNode ? '' : undefined}
+      data-detail={selectedNode && !diagnosticsOpen ? '' : undefined}
       tabIndex={-1}
       style={
         {
@@ -485,6 +717,25 @@ export function GitGraphViewer({
           <span className="agg-title-text">{title}</span>
         </div>
         <div className="agg-pill agg-actions">
+          <button
+            type="button"
+            className="agg-btn"
+            aria-pressed={animationOff}
+            aria-label={loc === 'zh-TW' ? '關閉動畫' : 'Disable animations'}
+            title={loc === 'zh-TW' ? '關閉動畫' : 'Disable animations'}
+            onClick={() =>
+              setAnimationOff((value) => {
+                try {
+                  localStorage.setItem('agg:animation-off', String(!value));
+                } catch {
+                  /* optional */
+                }
+                return !value;
+              })
+            }
+          >
+            ◷
+          </button>
           {hasRows && (
             <>
               <IconButton label={t.replay} onClick={() => canvasRef.current?.replay()}>
@@ -532,6 +783,7 @@ export function GitGraphViewer({
           t={t}
           branches={layout.branches}
           ahead={derived.ahead}
+          aheadKnown={layout.coverage?.commits.status === 'complete'}
           commitsOn={derived.commitsOn}
           defaultName={derived.defaultName}
           query={query}
@@ -543,6 +795,24 @@ export function GitGraphViewer({
           onFocusBranch={onFocusBranch}
           searchRef={searchRef}
           stats={statChips}
+        />
+      )}
+
+      {layout && <CoverageNotice layout={layout} locale={loc} />}
+      {layout && (
+        <DiagnosticsPanel
+          scope={diagnosticsScope}
+          open={diagnosticsOpen}
+          adapter={diagnostics}
+          layout={layout}
+          selectedSha={selectedSha}
+          inspection={inspection}
+          onInspectionChange={onInspectionChange}
+          selectionRevision={selectionRevision}
+          sourceKey={sourceKey ?? title}
+          locale={loc}
+          onGoto={(sha) => select(sha, 'nearest')}
+          onOpenChange={setDiagnosticsOpen}
         />
       )}
 
@@ -595,7 +865,9 @@ export function GitGraphViewer({
                   />
                 ))}
                 <div className="agg-footer">
-                  {layout.truncated ? `… ${t.truncated}` : t.startOfHistory}
+                  {layout.truncated || layout.coverage?.commits.status !== 'complete'
+                    ? `… ${t.truncated}`
+                    : t.startOfHistory}
                 </div>
                 {!webglFailed && (
                   <GitGraphCanvas
@@ -608,6 +880,7 @@ export function GitGraphViewer({
                     focus={sceneFocus}
                     handleRef={canvasRef}
                     sourceKey={sourceKey}
+                    reducedMotion={reducedMotion}
                     onError={() => setWebglFailed(true)}
                   />
                 )}
@@ -616,7 +889,7 @@ export function GitGraphViewer({
           </div>
         )}
 
-        {layout && derived && selectedNode && (
+        {layout && derived && selectedNode && !diagnosticsOpen && (
           <CommitDetail
             node={selectedNode}
             layout={layout}

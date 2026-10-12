@@ -373,6 +373,19 @@ export function buildLayout(data: GraphData, options: LayoutOptions = {}): Graph
 
   return {
     repo: data.repo,
+    coverage: data.coverage && {
+      ...data.coverage,
+      commits:
+        clipped || hidden.size > 0
+          ? {
+              ...data.coverage.commits,
+              status: 'partial',
+              reasons: [...new Set([...data.coverage.commits.reasons, 'display_window'])],
+              loaded: nodes.length,
+            }
+          : data.coverage.commits,
+    },
+    fetchedAt: data.fetchedAt,
     nodes,
     edges,
     branches,
