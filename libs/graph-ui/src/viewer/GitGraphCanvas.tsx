@@ -2,7 +2,8 @@ import { useEffect, useImperativeHandle, useRef } from 'react';
 import type { Ref, RefObject } from 'react';
 import type { GraphLayout } from '@adorable/graph-core';
 import { LogGraphScene } from '../scene/LogGraphScene';
-import type { SceneFocus, SceneTheme } from '../scene/LogGraphScene';
+import { DEFAULT_SCENE_APPEARANCE } from '../scene/LogGraphScene';
+import type { SceneAppearance, SceneFocus, SceneTheme } from '../scene/LogGraphScene';
 import type { LogMetrics } from '../scene/geometry';
 
 export interface GitGraphCanvasHandle {
@@ -14,6 +15,8 @@ export interface GitGraphCanvasProps {
   layout: GraphLayout;
   metrics: LogMetrics;
   theme: SceneTheme;
+  /** Theme colours and decorations for the scene. */
+  appearance?: SceneAppearance;
   /** 捲動容器（canvas 的視窗位置跟著它的 scrollTop 走） */
   scrollerRef: RefObject<HTMLElement | null>;
   /** 捲動內容（canvas 的定位基準；pointermove 也掛在這上面讓小球的眼睛跟著游標） */
@@ -35,6 +38,7 @@ export function GitGraphCanvas({
   layout,
   metrics,
   theme,
+  appearance = DEFAULT_SCENE_APPEARANCE,
   scrollerRef,
   trackRef,
   selectedSha,
@@ -46,8 +50,8 @@ export function GitGraphCanvas({
 }: GitGraphCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<LogGraphScene | null>(null);
-  const cb = useRef({ onError, theme, metrics, selectedSha, focus, reducedMotion });
-  cb.current = { onError, theme, metrics, selectedSha, focus, reducedMotion };
+  const cb = useRef({ onError, theme, appearance, metrics, selectedSha, focus, reducedMotion });
+  cb.current = { onError, theme, appearance, metrics, selectedSha, focus, reducedMotion };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -59,6 +63,7 @@ export function GitGraphCanvas({
     try {
       scene = new LogGraphScene(host, {
         theme: cb.current.theme,
+        appearance: cb.current.appearance,
         reducedMotion: mq.matches || cb.current.reducedMotion,
       });
     } catch (err) {
@@ -128,6 +133,10 @@ export function GitGraphCanvas({
   useEffect(() => {
     sceneRef.current?.setTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    sceneRef.current?.setAppearance(appearance);
+  }, [appearance]);
 
   useEffect(() => {
     sceneRef.current?.setSelected(selectedSha);

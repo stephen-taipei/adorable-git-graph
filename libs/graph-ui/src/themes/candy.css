@@ -1,0 +1,73 @@
+/* Candy — the original cartoon look. Loaded only while this theme is active.
+   Tokens are scoped to the viewer root (also works inside Shadow DOM) and to
+   any .agg-theme-scope host that carries the same data attributes. */
+
+:where(.agg-root, .agg-theme-scope)[data-theme-id='candy'] {
+  --agg-font:
+    ui-rounded, 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', 'Nunito', 'Chalkboard SE',
+    'Comic Neue', 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  --agg-ink: #2b2140;
+  --agg-paper: #fffaf0;
+  --agg-pop: #ffd23f;
+  --agg-danger: #ff7a8a;
+  --agg-sky-a: #bfe7ff;
+  --agg-sky-b: #fff1fb;
+  --agg-sky-c: #e9f9e6;
+  --agg-card: #fffdf7;
+  --agg-card-ink: #2b2140;
+  --agg-card-muted: #6f6590;
+  --agg-muted: #6f6590;
+  --agg-line: color-mix(in srgb, var(--agg-card-ink) 9%, transparent);
+  --agg-surface: #fff;
+  --agg-surface-muted: #6f6590;
+  --agg-tint-a: #e7defc;
+  --agg-tint-b: #ffe6a8;
+  --agg-soft-ink: var(--agg-ink);
+  --agg-soft-border: var(--agg-ink);
+  --agg-selected-bg: color-mix(in srgb, var(--agg-pop) 34%, transparent);
+  --agg-selected-bar: var(--agg-ink);
+  --agg-title-ink: var(--agg-ink);
+  --agg-focus: #5b8cff;
+  --agg-badge-bg: rgba(255, 255, 255, 0.7);
+  --agg-banner-error: #ffd9de;
+  --agg-banner-bg: #fff1c9;
+  --agg-on-accent: var(--agg-ink);
+  --agg-invalid: #c2253f;
+  --agg-backdrop: rgba(43, 33, 64, 0.55);
+  --agg-tag: #ffe27a;
+  --agg-type-chore: #e6e3ee;
+  --agg-type-feat: #bdf0d6;
+  --agg-type-fix: #ffcfd6;
+  --agg-type-docs: #cfe6ff;
+  --agg-type-refactor: #e1d2ff;
+  --agg-type-perf: #ffe2b3;
+  --agg-type-test: #d8f0bf;
+  --agg-type-revert: #ffb9c3;
+  --agg-ok: #bdf0d6;
+  --agg-fail: #ffcfd6;
+  --agg-shadow-color: rgba(43, 33, 64, 0.25);
+  --agg-blob-shadow: rgba(43, 33, 64, 0.22);
+}
+
+:where(.agg-root, .agg-theme-scope)[data-theme-id='candy'][data-theme='night'] {
+  --agg-sky-a: #1e1a4d;
+  --agg-sky-b: #3a2d7c;
+  --agg-sky-c: #55338f;
+  --agg-muted: #cfc7f5;
+  --agg-card: #2d2759;
+  --agg-card-ink: #f4efff;
+  --agg-card-muted: #b9afe6;
+  --agg-soft-ink: #fff;
+  --agg-soft-border: #cfc7f5;
+  --agg-selected-bg: color-mix(in srgb, #fff 13%, transparent);
+  --agg-selected-bar: var(--agg-pop);
+  --agg-title-ink: #fff;
+}
+
+html[data-theme-id='candy'] body {
+  background: #bfe7ff;
+}
+
+html[data-theme-id='candy'][data-theme='night'] body {
+  background: #1e1a4d;
+}

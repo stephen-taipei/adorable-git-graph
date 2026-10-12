@@ -33,6 +33,7 @@ export class TextureKit {
   readonly crown: THREE.CanvasTexture;
   readonly sparkle: THREE.CanvasTexture;
   readonly sweat: THREE.CanvasTexture;
+  readonly horns: THREE.CanvasTexture;
   readonly gloss: THREE.CanvasTexture;
   readonly dots: THREE.CanvasTexture;
 
@@ -245,6 +246,26 @@ export class TextureKit {
         ctx.beginPath();
         ctx.ellipse(38, 84, 6, 10, 0.3, 0, Math.PI * 2);
         ctx.fill();
+      }),
+    );
+
+    // Two small, rounded devil horns (hacker theme), drawn as one wide sprite.
+    this.horns = this.add(
+      makeCanvas(256, 96, (ctx) => {
+        ctx.fillStyle = '#ff4f8b';
+        ctx.strokeStyle = OUTLINE_COLOR;
+        ctx.lineWidth = 9;
+        ctx.lineJoin = 'round';
+        for (const side of [-1, 1]) {
+          const bx = 128 + side * 74;
+          ctx.beginPath();
+          ctx.moveTo(bx - 26, 92);
+          ctx.quadraticCurveTo(bx - 18, 40, bx + side * 18, 10);
+          ctx.quadraticCurveTo(bx + side * 6, 52, bx + 26, 92);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
       }),
     );
 

@@ -2,6 +2,8 @@ import { createRoot } from 'react-dom/client';
 import { viewerCss } from '@adorable/graph-ui';
 import { App } from './App';
 import overlayCss from './styles.css?inline';
+// The extension ships only the default theme, inlined with the structure styles.
+import themeCss from '@adorable/graph-ui/themes/candy.css?inline';
 
 const HOST_ID = 'adorable-git-graph-host';
 
@@ -13,7 +15,7 @@ function mount() {
   host.id = HOST_ID;
   const shadow = host.attachShadow({ mode: 'open' });
 
-  const css = `${overlayCss}\n${viewerCss}`;
+  const css = `${overlayCss}\n${viewerCss}\n${themeCss}`;
   try {
     // constructable stylesheet 不受頁面 CSP style-src 影響
     const sheet = new CSSStyleSheet();

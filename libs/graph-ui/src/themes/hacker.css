@@ -1,0 +1,145 @@
+/* Hacker imp — classic deep black and teal-green terminal, with a cute little
+   devil. Loaded only while this theme is active. Night is the signature look;
+   day is a light terminal with the same accents. */
+
+:where(.agg-root, .agg-theme-scope)[data-theme-id='hacker'] {
+  --agg-font:
+    'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, Menlo, Consolas,
+    'Noto Sans Mono CJK TC', 'PingFang TC', 'Microsoft JhengHei', monospace;
+  --agg-ink: #0b3d33;
+  --agg-paper: #effff8;
+  --agg-pop: #00c27a;
+  --agg-danger: #e0245e;
+  --agg-sky-a: #e6fff5;
+  --agg-sky-b: #f7e8fb;
+  --agg-sky-c: #c9f2e3;
+  --agg-card: #f7fffb;
+  --agg-card-ink: #08302a;
+  --agg-card-muted: #3f7d6e;
+  --agg-muted: #3f7d6e;
+  --agg-line: color-mix(in srgb, var(--agg-card-ink) 12%, transparent);
+  --agg-surface: #fff;
+  --agg-surface-muted: #3f7d6e;
+  --agg-tint-a: #d3f5ea;
+  --agg-tint-b: #f3dcf7;
+  --agg-soft-ink: var(--agg-ink);
+  --agg-soft-border: var(--agg-ink);
+  --agg-selected-bg: color-mix(in srgb, var(--agg-pop) 22%, transparent);
+  --agg-selected-bar: var(--agg-ink);
+  --agg-title-ink: var(--agg-ink);
+  --agg-focus: #d6338a;
+  --agg-badge-bg: rgba(255, 255, 255, 0.75);
+  --agg-banner-error: #ffd9e3;
+  --agg-banner-bg: #e2fbef;
+  --agg-on-accent: var(--agg-ink);
+  --agg-invalid: #c41d55;
+  --agg-backdrop: rgba(8, 48, 42, 0.45);
+  --agg-tag: #f6c8ec;
+  --agg-type-chore: #e3efeb;
+  --agg-type-feat: #c4f5df;
+  --agg-type-fix: #ffd0dc;
+  --agg-type-docs: #cdeefa;
+  --agg-type-refactor: #e7d6fb;
+  --agg-type-perf: #fbe8b8;
+  --agg-type-test: #dcf5c4;
+  --agg-type-revert: #ffc2cf;
+  --agg-ok: #c4f5df;
+  --agg-fail: #ffd0dc;
+  --agg-shadow-color: rgba(8, 48, 42, 0.22);
+  --agg-blob-shadow: rgba(8, 48, 42, 0.2);
+  --agg-glow: rgba(0, 194, 122, 0.35);
+  --agg-scan: rgba(8, 48, 42, 0.04);
+}
+
+:where(.agg-root, .agg-theme-scope)[data-theme-id='hacker'][data-theme='night'] {
+  --agg-ink: #2dffc4;
+  --agg-paper: #061310;
+  --agg-pop: #39ff88;
+  --agg-danger: #ff4f6d;
+  --agg-sky-a: #020605;
+  --agg-sky-b: #1a0820;
+  --agg-sky-c: #04140f;
+  --agg-card: #08130f;
+  --agg-card-ink: #c9ffe9;
+  --agg-card-muted: #62bfa2;
+  --agg-muted: #62bfa2;
+  --agg-surface: #0c1a16;
+  --agg-surface-muted: #62bfa2;
+  --agg-tint-a: #10302a;
+  --agg-tint-b: #2a1636;
+  --agg-soft-ink: #2dffc4;
+  --agg-soft-border: #1d8f74;
+  --agg-selected-bg: rgba(57, 255, 136, 0.14);
+  --agg-selected-bar: #39ff88;
+  --agg-title-ink: #39ff88;
+  --agg-focus: #ff4fa3;
+  --agg-badge-bg: rgba(255, 255, 255, 0.55);
+  --agg-banner-error: #3a0f1c;
+  --agg-banner-bg: #0f281f;
+  --agg-on-accent: #04110c;
+  --agg-invalid: #ff4f6d;
+  --agg-backdrop: rgba(0, 0, 0, 0.7);
+  --agg-tag: #3b1240;
+  --agg-type-chore: #13211d;
+  --agg-type-feat: #0f3a2a;
+  --agg-type-fix: #3a1420;
+  --agg-type-docs: #0f2a3a;
+  --agg-type-refactor: #24163d;
+  --agg-type-perf: #3a2a10;
+  --agg-type-test: #1e3a10;
+  --agg-type-revert: #3a1018;
+  --agg-ok: #0f3a2a;
+  --agg-fail: #3a1420;
+  --agg-shadow-color: rgba(0, 255, 190, 0.12);
+  --agg-blob-shadow: rgba(0, 255, 190, 0.18);
+  --agg-glow: rgba(57, 255, 136, 0.55);
+  --agg-scan: rgba(45, 255, 196, 0.045);
+}
+
+/* Terminal backdrop: faint grid and scanlines over the sky. */
+.agg-root[data-theme-id='hacker'] .agg-sky::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, var(--agg-scan) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, var(--agg-scan) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(0deg, var(--agg-scan) 1px, transparent 1px) 0 0 / 28px 28px;
+}
+
+.agg-root[data-theme-id='hacker'] .agg-title-text {
+  text-shadow: 0 0 10px var(--agg-glow);
+}
+
+/* A blinking prompt cursor after the title; still when motion is reduced. */
+.agg-root[data-theme-id='hacker'] .agg-title-text::after {
+  content: '_';
+  margin-left: 2px;
+  color: var(--agg-pop);
+  animation: agg-hacker-blink 1.1s steps(1) infinite;
+}
+
+.agg-root[data-theme-id='hacker'][data-reduced-motion] .agg-title-text::after {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agg-root[data-theme-id='hacker'] .agg-title-text::after {
+    animation: none;
+  }
+}
+
+@keyframes agg-hacker-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+html[data-theme-id='hacker'] body {
+  background: #e6fff5;
+}
+
+html[data-theme-id='hacker'][data-theme='night'] body {
+  background: #020605;
+}
