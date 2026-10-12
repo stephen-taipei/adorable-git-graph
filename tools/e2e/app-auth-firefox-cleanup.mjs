@@ -14,8 +14,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const self = fileURLToPath(import.meta.url);
 const CASES = {
   build: { expect: 'fixture: bundle build failed', launches: false },
-  // A real process that starts and exits at once, so the launch really fails.
+  // A real process that starts and exits at once, so the launch really fails:
+  // Node rejects the Firefox flags (portable across Linux, macOS, Windows).
   launch: { expect: 'Failed to launch the browser process', launches: false },
+  // Writing the failure record throws (missing artifacts directory).
+  record: {
+    expect: 'fixture: verification failed after launch',
+    launches: true,
+    cleanupErrors: 1,
+    cleanupError: 'failure record',
+  },
   verify: { expect: 'fixture: verification failed after launch', launches: true },
   cleanup: {
     expect: 'fixture: verification failed after launch',
@@ -55,8 +63,8 @@ async function child(name, root, firefox, repoDir, outDir) {
           },
         }
       : name === 'launch'
-        ? { firefox: '/bin/false' }
-        : name === 'verify'
+        ? { firefox: process.execPath }
+        : name === 'verify' || name === 'record'
           ? { verify: true }
           : { verify: true, cleanup: true };
   let outcome;
@@ -65,6 +73,11 @@ async function child(name, root, firefox, repoDir, outDir) {
       root,
       repoDir,
       outDir,
+      // A directory that does not exist, so writing the failure record throws.
+      artifacts:
+        name === 'record'
+          ? resolve(tmpdir(), 'agg-missing-artifacts', String(process.pid))
+          : undefined,
       firefox,
       display: process.env.DISPLAY,
       faults,
@@ -130,6 +143,11 @@ export async function verifyFirefoxCleanup({ root, firefox, display, artifacts }
       assert(report.rejected, `${name}: helper rejects`);
       assert.match(report.message, new RegExp(spec.expect), `${name}: original failure kept`);
       assert.equal(report.cleanupErrors.length, spec.cleanupErrors ?? 0, `${name}: cleanup errors`);
+      if (spec.cleanupError)
+        assert(
+          report.cleanupErrors.every((e) => e.startsWith(spec.cleanupError)),
+          `${name}: cleanup error names the failing step`,
+        );
       assert(typeof port === 'number', `${name}: listener was started`);
       assert(await refused(port), `${name}: listener closed`);
       if (spec.launches) assert(typeof pid === 'number', `${name}: Firefox was launched`);

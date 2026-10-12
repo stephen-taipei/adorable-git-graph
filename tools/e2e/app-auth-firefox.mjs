@@ -295,30 +295,40 @@ export async function verifyFirefoxApp({
     );
   } catch (error) {
     failure = error;
-    if (artifacts) {
+  }
+  // Recording the failure is best effort: it must never block cleanup or
+  // replace the original failure. Page reads are bounded in time.
+  const cleanupErrors = [];
+  if (failure && artifacts) {
+    try {
+      const bounded = (promise) =>
+        Promise.race([promise, new Promise((done) => setTimeout(done, 3000, null))]).catch(
+          () => null,
+        );
       const state = await Promise.all(
         pages.map((p) =>
-          p
-            .evaluate(() => ({
+          bounded(
+            p.evaluate(() => ({
               page: `${location.href} ${document.body.textContent.slice(0, 400)}`,
               console: window.__aggConsoleErrors?.map((e) => e.slice(0, 1500)),
-            }))
-            .catch(() => null),
+            })),
+          ),
         ),
       );
       writeFileSync(
         resolve(artifacts, 'firefox-app-auth-failure.json'),
         JSON.stringify(
-          { results, calls, errors, unexpected, state, error: String(error.message) },
+          { results, calls, errors, unexpected, state, error: String(failure.message) },
           null,
           2,
         ) + '\n',
       );
+    } catch (error) {
+      cleanupErrors.push(new Error(`failure record: ${error.message}`));
     }
   }
   // Release every owned resource even when one step fails; the original
   // failure stays the one reported.
-  const cleanupErrors = [];
   const step = async (label, fn) => {
     try {
       await fn();
