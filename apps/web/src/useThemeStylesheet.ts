@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ThemeId } from '@adorable/graph-ui';
 import { THEME_STYLESHEETS, loadThemeStylesheet } from './themeLoader';
 
-interface BootText {
+export interface BootText {
   loading: string;
   failed: string;
   retry: string;
@@ -12,7 +12,7 @@ interface BootText {
 let focusBeforeBoot: HTMLElement | null = null;
 
 /** Shows or hides the full-screen boot screen from index.html (absent in tests). */
-function setBoot(state: 'loading' | 'done' | 'failed', text: BootText) {
+export function setBoot(state: 'loading' | 'done' | 'failed', text: BootText) {
   const boot = document.getElementById('agg-boot');
   const root = document.getElementById('root');
   // While the boot screen covers the app, keep the app out of focus and the a11y tree.
@@ -30,7 +30,9 @@ function setBoot(state: 'loading' | 'done' | 'failed', text: BootText) {
         focusBeforeBoot?.isConnected === true
           ? focusBeforeBoot
           : root.querySelector<HTMLElement>('.agg-root');
-      if (target && (document.activeElement === document.body || !document.activeElement))
+      // Focus that was dropped, or left on the boot screen's own retry button.
+      const active = document.activeElement;
+      if (target && (!active || active === document.body || boot?.contains(active)))
         target.focus({ preventScroll: true });
       focusBeforeBoot = null;
     }
@@ -46,7 +48,11 @@ function setBoot(state: 'loading' | 'done' | 'failed', text: BootText) {
   const errorText = document.getElementById('agg-boot-error-text');
   if (errorText) errorText.textContent = text.failed;
   const retry = document.getElementById('agg-boot-retry');
-  if (retry) retry.textContent = text.retry;
+  if (retry) {
+    retry.textContent = text.retry;
+    // The app underneath is inert: keyboard users land on the way out.
+    if (state === 'failed') retry.focus({ preventScroll: true });
+  }
 }
 
 /**

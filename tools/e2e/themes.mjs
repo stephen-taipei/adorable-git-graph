@@ -22,8 +22,23 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     if (fail) return route.abort();
     return route.continue();
   });
+  // Lets the crash check make the App throw on its first render (opt-in per tab).
+  await ctx.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = (q) => {
+      if (sessionStorage.getItem('agg-e2e-crash')) throw new Error('agg e2e crash');
+      return original(q);
+    };
+  });
   const page = await ctx.newPage();
-  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('pageerror', (e) => {
+    if (!e.message.includes('agg e2e crash')) errors.push(e.message);
+  });
+  const focusInApp = () =>
+    page.evaluate(() => {
+      const a = document.activeElement;
+      return Boolean(a && a !== document.body && document.getElementById('root')?.contains(a));
+    });
   const state = () =>
     page.evaluate(() => ({
       boot: document.getElementById('agg-boot')?.dataset.state ?? null,
@@ -157,13 +172,43 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     assert.equal(s.linkState, 'failed', 'theme link marked failed');
     assert.equal(s.tokens, '', 'no theme tokens applied after a failed load');
     await page.screenshot({ path: resolve(artifacts, 'theme-failed.png') });
+    assert(
+      await page.evaluate(() => document.activeElement?.id === 'agg-boot-retry'),
+      'keyboard focus is on the retry button',
+    );
     fail = false;
-    await page.click('#agg-boot-retry');
+    await page.keyboard.press('Enter');
     await done();
     await ready();
     s = await state();
     assert.deepEqual(s.applied, ['hacker'], 'retry loads the theme');
+    assert(await focusInApp(), 'focus moves into the app after a successful retry');
     results.push({ label: 'failed load offers a retry' });
+
+    // A crash on the first render shows on the theme-neutral boot screen
+    // (readable without any theme stylesheet), and its retry recovers.
+    await page.evaluate(() => sessionStorage.setItem('agg-e2e-crash', '1'));
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById('agg-boot-error')?.hidden);
+    s = await state();
+    assert.equal(s.boot, 'loading', 'boot screen shows the crash instead of covering it');
+    assert.equal(s.rootInert, true);
+    const crash = await page.evaluate(() => ({
+      text: document.getElementById('agg-boot-error-text')?.textContent ?? '',
+      focused: document.activeElement?.id ?? null,
+      color: getComputedStyle(document.getElementById('agg-boot')).color,
+      bg: getComputedStyle(document.getElementById('agg-boot')).backgroundColor,
+    }));
+    assert(crash.text.length > 0, 'crash message shown');
+    assert.equal(crash.focused, 'agg-boot-retry');
+    assert.notEqual(crash.color, crash.bg, 'crash screen has its own readable colours');
+    await page.screenshot({ path: resolve(artifacts, 'theme-crash.png') });
+    await page.evaluate(() => sessionStorage.removeItem('agg-e2e-crash'));
+    await page.keyboard.press('Enter');
+    await done();
+    await ready();
+    assert(await focusInApp(), 'focus moves into the app after recovering');
+    results.push({ label: 'a first-render crash is shown on the boot screen and recovers' });
 
     assert.deepEqual(errors, [], 'page errors');
     writeFileSync(
