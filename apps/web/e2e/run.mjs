@@ -2674,7 +2674,8 @@ try {
   await step(
     'token dialog: stored locally, sent only as a Bearer header, never in URL or DOM',
     async () => {
-      // 換 token 會重新抓取（中間經過 loading 畫面、列表重新掛載）：回來時要停在原本看的那一列，選取也還在
+      // 換 token 會重新抓取（中間經過 loading 畫面、列表重新掛載）：回來時要停在原本看的那一列；
+      // 選取屬於舊憑證的畫面狀態，換憑證後必須清掉（與 tools/e2e/app-auth-isolation.mjs 的 credential change 規則一致）
       await page.locator('.agg-scroll').evaluate((el) => el.scrollTo(0, 200));
       await sleep(400);
       const beforeTop = await scrollTopNow();
@@ -2704,7 +2705,7 @@ try {
         10_000,
         'the scroll position restored after the token reload',
       );
-      assert.equal(await selectedSha(), picked, 'the selection survives the token reload');
+      assert.equal(await selectedSha(), null, 'a credential change drops the old selection');
       await page.keyboard.press('Escape');
       // DOM（含所有 shadow tree）、輸入框的值、cookie、sessionStorage 都不能有 token
       const exposed = await page.evaluate(() => {
@@ -2734,12 +2735,16 @@ try {
       );
       assert.ok(seen.paths.every((p) => !p.includes('github_pat')));
 
-      // 帶 token 抓到的快取，token 移除後不可再被拿來顯示
+      // 帶 token 抓到的快取，token 移除後不可再被拿來顯示。
+      // 快取以 credentialScope（token 的 SHA-256 指紋）區分；沒有 token 時是空字串的指紋
+      const ANON_SCOPE = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
       const cacheEntries = () =>
-        page.evaluate(() =>
-          Object.keys(sessionStorage)
-            .filter((k) => k.startsWith('agg:gh:'))
-            .map((k) => JSON.parse(sessionStorage.getItem(k)).authed),
+        page.evaluate(
+          (anon) =>
+            Object.keys(sessionStorage)
+              .filter((k) => k.startsWith('agg:gh:'))
+              .map((k) => JSON.parse(sessionStorage.getItem(k)).credentialScope !== anon),
+          ANON_SCOPE,
         );
       await waitUntil(
         async () => (await cacheEntries()).includes(true),
@@ -2753,7 +2758,7 @@ try {
           JSON.stringify({
             savedAt: Date.now(),
             graph: { repo: {}, commits: [], refs: [] },
-            authed: true,
+            credentialScope: 'f'.repeat(64),
           }),
         ),
       );

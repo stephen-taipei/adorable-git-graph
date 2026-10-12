@@ -344,10 +344,13 @@ export function GitGraphViewer({
   // 回來時才會從頭看，而不是恢復成上一次看這個 repo 的位置
   const identity = `${sourceKey ?? ''}|${title}`;
   const lastIdentity = useRef(identity);
+  // 這次掛載期間換過來源 / repo：回來時從頭看，不恢復存下的位置與選取（重新整理才恢復）
+  const switchedIdentity = useRef(false);
   useLayoutEffect(() => {
     if (lastIdentity.current === identity) return;
     lastIdentity.current = identity;
     lastRepo.current = null;
+    switchedIdentity.current = true;
   }, [identity]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -394,7 +397,8 @@ export function GitGraphViewer({
         !contextNavigated.current &&
         (viewerStateKey === undefined || saved.viewerStateKey === viewerStateKey) &&
         (saved.contextKey === contextKey || (!hasContext && saved.contextKey === undefined));
-      if (!sameContext) saved = {};
+      if (!sameContext || switchedIdentity.current) saved = {};
+      switchedIdentity.current = false;
       const restored = saved.anchor ? layout.nodes.find((n) => n.sha === saved.anchor) : undefined;
       sc.scrollTop = restored ? Math.max(0, topPad + (restored.row + (saved.frac ?? 0)) * rowH) : 0;
       anchor.current = { frac: 0 };
