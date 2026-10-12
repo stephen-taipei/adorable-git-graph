@@ -5,7 +5,7 @@
 ## 狀態
 
 - **兩項 P1 已修正，待獨立正式驗收。**
-- 最新受測候選版本為 **`387a57e`**（第二輪 `b531ac8` 加上 PR review 的一項修正，見文末「第二輪之後」）。第二輪 `b531ac8` 的結果見「第二輪」。第一輪 `f20038e` 的結果保留在下方各節，不改寫。
+- 最新受測候選版本已移至 **`19d41e3`**，見 [PR #7 review 後續修正驗證紀錄](rd-pr7-followup-validation.md)。本頁 `f20038e`、`b531ac8`、`387a57e` 各輪結果保留不改寫。
 - 原始正式結果維持 **BLOCK**（`3eb1cb8`、Run `sbw-20261011T201955Z-a8a3cc81d327`、Package `review-5b6fe6a1273d586ad1e10f84bf7feec7`，見 [rd-open-p1.md](rd-open-p1.md)）。本頁是工程檢查，不是正式驗收，不解除 BLOCK／HOLD。
 - 原 campaign `campaign-41b66b43bd4f86a8fb0a6cac89a94aad` 維持 13／13。本次沒有修改舊 ledger、signed runtime、signer／allowlist，也沒有建立新的 run、package 或 campaign。
 
