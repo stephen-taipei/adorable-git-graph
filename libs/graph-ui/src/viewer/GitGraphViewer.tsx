@@ -344,14 +344,21 @@ export function GitGraphViewer({
   // 回來時才會從頭看，而不是恢復成上一次看這個 repo 的位置
   const identity = `${sourceKey ?? ''}|${title}`;
   const lastIdentity = useRef(identity);
-  // 這次掛載期間換過來源 / repo：回來時從頭看，不恢復存下的位置與選取（重新整理才恢復）
-  const switchedIdentity = useRef(false);
   useLayoutEffect(() => {
     if (lastIdentity.current === identity) return;
     lastIdentity.current = identity;
     lastRepo.current = null;
-    switchedIdentity.current = true;
   }, [identity]);
+  // 這次掛載期間換過來源 / repo：回來時從頭看，不恢復存下的位置與選取（重新整理才恢復）。
+  // 只看 sourceKey：載入完成時標題從預設值變成 repo 名稱不算換 repo（沒有 sourceKey 時才用標題）
+  const navKey = sourceKey ?? title;
+  const lastNavKey = useRef(navKey);
+  const switchedIdentity = useRef(false);
+  useLayoutEffect(() => {
+    if (lastNavKey.current === navKey) return;
+    lastNavKey.current = navKey;
+    switchedIdentity.current = true;
+  }, [navKey]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const metricsRef = useRef(metrics);

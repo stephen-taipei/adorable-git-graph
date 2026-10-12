@@ -3415,6 +3415,20 @@ try {
         );
         await replayDone(deep);
         await graphSync('beta (deep link)', { pg: deep });
+
+        // 重新整理同一個 repo：標題先是預設值、資料到了才變成 beta，這不算換 repo，選取要恢復
+        const pickedSha = (await domRows(deep))[3].sha;
+        await deep
+          .locator(`.agg-commit[data-sha="${pickedSha}"]`)
+          .click({ position: { x: 150, y: 10 } });
+        await deep.waitForSelector(`.agg-commit[data-selected][data-sha="${pickedSha}"]`);
+        await sleep(400);
+        await deep.reload();
+        await titleIs('beta', deep);
+        await waitShowsRepo(fx.beta, 'beta (reloaded)', deep);
+        await deep.waitForSelector(`.agg-commit[data-selected][data-sha="${pickedSha}"]`, {
+          timeout: 10_000 * SCALE,
+        });
       } finally {
         await deep.close();
       }
