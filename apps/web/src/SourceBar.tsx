@@ -5,25 +5,27 @@ import type { Source } from './source';
 import { DEFAULT_REPO } from './protocol';
 import type { ReposResponse } from './protocol';
 import { LOCAL_ONLY, addLocalRepo, fetchLocalRepos } from './localRepos';
+import { AUTO_SCHEME, schemeCycle } from '@adorable/graph-ui';
+import type { ColorScheme, SchemeSetting, ThemeId } from '@adorable/graph-ui';
 import { t } from './i18n';
 
-export type ThemeSetting = 'auto' | 'day' | 'night';
-export const isThemeSetting = (v: string): v is ThemeSetting =>
-  v === 'auto' || v === 'day' || v === 'night';
+const TONE_ICON: Record<ColorScheme['tone'], string> = { day: '☀️', night: '🌙' };
 
-const NEXT_THEME: Record<ThemeSetting, ThemeSetting> = { auto: 'day', day: 'night', night: 'auto' };
-const THEME_ICON: Record<ThemeSetting, string> = { auto: '🌓', day: '☀️', night: '🌙' };
-const THEME_LABEL: Record<ThemeSetting, string> = {
-  auto: t.themeAuto,
-  day: t.themeDay,
-  night: t.themeNight,
-};
+/** The next setting in this theme's cycle: auto → each of its schemes → auto. */
+function nextScheme(themeId: ThemeId, setting: SchemeSetting, scheme: ColorScheme): SchemeSetting {
+  const cycle = schemeCycle(themeId);
+  // A legacy or other-theme setting continues from the scheme it resolved to.
+  const at = cycle.indexOf(setting === AUTO_SCHEME ? setting : scheme.id);
+  return cycle[(at + 1) % cycle.length]!;
+}
 
 export function SourceBar({
   source,
   lastLocal,
   onNavigate,
   theme,
+  themeId,
+  scheme,
   onThemeChange,
   themeExtra,
 }: {
@@ -31,8 +33,11 @@ export function SourceBar({
   /** 最近一次看的本機 repo：從 GitHub 切回「本機」時回到它，而不是預設 repo */
   lastLocal: Source;
   onNavigate: (s: Source) => void;
-  theme: ThemeSetting;
-  onThemeChange: (t: ThemeSetting) => void;
+  /** Colour-scheme setting ('auto' or a scheme id) and what it resolved to for `themeId`. */
+  theme: SchemeSetting;
+  themeId: ThemeId;
+  scheme: ColorScheme;
+  onThemeChange: (t: SchemeSetting) => void;
   /** 主題（skin）切換：緊接在明暗按鈕後面 */
   themeExtra?: ReactNode;
 }) {
@@ -117,11 +122,12 @@ export function SourceBar({
       <button
         type="button"
         className="web-icon web-theme"
-        title={THEME_LABEL[theme]}
-        aria-label={THEME_LABEL[theme]}
-        onClick={() => onThemeChange(NEXT_THEME[theme])}
+        title={theme === AUTO_SCHEME ? t.themeAuto : t.schemeLabel(scheme.id)}
+        aria-label={theme === AUTO_SCHEME ? t.themeAuto : t.schemeLabel(scheme.id)}
+        data-scheme={theme === AUTO_SCHEME ? AUTO_SCHEME : scheme.id}
+        onClick={() => onThemeChange(nextScheme(themeId, theme, scheme))}
       >
-        {THEME_ICON[theme]}
+        {theme === AUTO_SCHEME ? '🌓' : TONE_ICON[scheme.tone]}
       </button>
       {themeExtra}
     </div>

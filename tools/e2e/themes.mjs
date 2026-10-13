@@ -163,14 +163,60 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     assert.equal(s.root, 'hacker');
     results.push({ label: 'reload loads only the saved theme' });
 
-    // Screenshots of every theme × colour mode.
+    // Every theme offers its own light and dark schemes on the scheme button:
+    // auto → light → dark → auto, and the stylesheet's dark block applies.
+    for (const id of ['hacker', 'halloween', 'candy']) {
+      await page.evaluate((id) => {
+        localStorage.setItem('agg.theme-id', id);
+        localStorage.setItem('agg.theme', 'auto');
+      }, id);
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.reload();
+      await done();
+      await ready();
+      const lightInk = (await state()).tokens;
+      const seen = [];
+      for (let i = 0; i < 3; i++) {
+        await page.click('.web-theme');
+        await page.waitForFunction(
+          (want) => document.querySelector('.web-theme')?.dataset.scheme === want,
+          ['light', 'dark', 'auto'][i],
+        );
+        seen.push(
+          await page.evaluate(() => ({
+            stored: localStorage.getItem('agg.theme'),
+            scheme: document.querySelector('.agg-root')?.getAttribute('data-scheme'),
+            tone: document.querySelector('.agg-root')?.getAttribute('data-theme'),
+            html: document.documentElement.dataset.scheme,
+            ink: getComputedStyle(document.querySelector('.agg-root'))
+              .getPropertyValue('--agg-ink')
+              .trim(),
+          })),
+        );
+      }
+      assert.deepEqual(
+        seen.map((s) => [s.stored, s.scheme, s.tone, s.html]),
+        [
+          ['light', 'light', 'day', 'light'],
+          ['dark', 'dark', 'night', 'dark'],
+          ['auto', 'light', 'day', 'light'],
+        ],
+        `${id} scheme cycle`,
+      );
+      assert.equal(seen[0].ink, lightInk, `${id} light scheme uses the base tokens`);
+      if (id !== 'candy')
+        assert.notEqual(seen[1].ink, lightInk, `${id} dark scheme overrides tokens`);
+    }
+    results.push({ label: 'every theme cycles auto → light → dark colour schemes' });
+
+    // Screenshots of every theme × colour scheme.
     for (const [id, mode] of [
-      ['hacker', 'night'],
-      ['hacker', 'day'],
-      ['halloween', 'night'],
-      ['halloween', 'day'],
-      ['candy', 'day'],
-      ['candy', 'night'],
+      ['hacker', 'dark'],
+      ['hacker', 'light'],
+      ['halloween', 'dark'],
+      ['halloween', 'light'],
+      ['candy', 'light'],
+      ['candy', 'dark'],
     ]) {
       await page.evaluate(
         ({ id, mode }) => {
@@ -185,7 +231,7 @@ export async function verifyThemes({ browser, origin, artifacts }) {
       await page.waitForFunction(
         ({ id, mode }) => {
           const r = document.querySelector('.agg-root');
-          return r?.getAttribute('data-theme-id') === id && r?.getAttribute('data-theme') === mode;
+          return r?.getAttribute('data-theme-id') === id && r?.getAttribute('data-scheme') === mode;
         },
         { id, mode },
       );

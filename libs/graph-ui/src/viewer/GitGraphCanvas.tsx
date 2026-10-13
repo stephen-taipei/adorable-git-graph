@@ -3,7 +3,7 @@ import type { Ref, RefObject } from 'react';
 import type { GraphLayout } from '@adorable/graph-core';
 import { LogGraphScene } from '../scene/LogGraphScene';
 import { DEFAULT_SCENE_APPEARANCE } from '../scene/LogGraphScene';
-import type { SceneAppearance, SceneFocus, SceneTheme } from '../scene/LogGraphScene';
+import type { SceneAppearance, SceneFocus } from '../scene/LogGraphScene';
 import type { LogMetrics } from '../scene/geometry';
 
 export interface GitGraphCanvasHandle {
@@ -14,8 +14,7 @@ export interface GitGraphCanvasHandle {
 export interface GitGraphCanvasProps {
   layout: GraphLayout;
   metrics: LogMetrics;
-  theme: SceneTheme;
-  /** Theme colours and decorations for the scene. */
+  /** Theme and colour-scheme colours and decorations for the scene. */
   appearance?: SceneAppearance;
   /** 捲動容器（canvas 的視窗位置跟著它的 scrollTop 走） */
   scrollerRef: RefObject<HTMLElement | null>;
@@ -37,7 +36,6 @@ export interface GitGraphCanvasProps {
 export function GitGraphCanvas({
   layout,
   metrics,
-  theme,
   appearance = DEFAULT_SCENE_APPEARANCE,
   scrollerRef,
   trackRef,
@@ -50,8 +48,8 @@ export function GitGraphCanvas({
 }: GitGraphCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<LogGraphScene | null>(null);
-  const cb = useRef({ onError, theme, appearance, metrics, selectedSha, focus, reducedMotion });
-  cb.current = { onError, theme, appearance, metrics, selectedSha, focus, reducedMotion };
+  const cb = useRef({ onError, appearance, metrics, selectedSha, focus, reducedMotion });
+  cb.current = { onError, appearance, metrics, selectedSha, focus, reducedMotion };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -62,7 +60,6 @@ export function GitGraphCanvas({
     let scene: LogGraphScene;
     try {
       scene = new LogGraphScene(host, {
-        theme: cb.current.theme,
         appearance: cb.current.appearance,
         reducedMotion: mq.matches || cb.current.reducedMotion,
       });
@@ -129,10 +126,6 @@ export function GitGraphCanvas({
     scene.setFocus(cb.current.focus);
     prev.current = { repo, nodes: layout.nodes.length };
   }, [layout, sourceKey, scrollerRef]);
-
-  useEffect(() => {
-    sceneRef.current?.setTheme(theme);
-  }, [theme]);
 
   useEffect(() => {
     sceneRef.current?.setAppearance(appearance);

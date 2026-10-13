@@ -11,28 +11,23 @@ import { computeMetrics, planWindow, visibleRows } from './geometry';
 import type { CanvasWindow, LogMetrics } from './geometry';
 import type { BallTopper } from '../themes/config';
 
-export type SceneTheme = 'day' | 'night';
-
 /** Theme-dependent scene colours and decorations (see themes/config.ts). */
 export interface SceneAppearance {
   readonly outline: string;
   readonly selection: { readonly outer: string; readonly inner: string };
-  readonly dim: Readonly<Record<SceneTheme, { readonly body: string; readonly outline: string }>>;
+  /** Colours of commits faded out by search / branch focus, for the active colour scheme. */
+  readonly dim: { readonly body: string; readonly outline: string };
   readonly topper: BallTopper;
 }
 
 export const DEFAULT_SCENE_APPEARANCE: SceneAppearance = {
   outline: OUTLINE_COLOR,
   selection: { outer: OUTLINE_COLOR, inner: '#ffd23f' },
-  dim: {
-    day: { body: '#e6e1f1', outline: '#bcb3d8' },
-    night: { body: '#6a5fa8', outline: '#8479c4' },
-  },
+  dim: { body: '#e6e1f1', outline: '#bcb3d8' },
   topper: 'none',
 };
 
 export interface SceneOptions {
-  theme?: SceneTheme;
   appearance?: SceneAppearance;
   /** 尊重 prefers-reduced-motion：不播放進場動畫與閒置晃動。 */
   reducedMotion?: boolean;
@@ -147,7 +142,7 @@ export class LogGraphScene {
     side: THREE.BackSide,
   });
   private readonly dimHullMat = new THREE.MeshBasicMaterial({
-    color: DEFAULT_SCENE_APPEARANCE.dim.day.outline,
+    color: DEFAULT_SCENE_APPEARANCE.dim.outline,
     side: THREE.BackSide,
   });
   private readonly dimBodyMat: THREE.MeshToonMaterial;
@@ -176,7 +171,6 @@ export class LogGraphScene {
   private raf = 0;
   private paused = false;
   private disposed = false;
-  private theme: SceneTheme;
   private appearance: SceneAppearance;
   private reduced: boolean;
 
@@ -193,7 +187,6 @@ export class LogGraphScene {
 
   constructor(host: HTMLElement, opts: SceneOptions = {}) {
     this.host = host;
-    this.theme = opts.theme ?? 'day';
     this.appearance = opts.appearance ?? DEFAULT_SCENE_APPEARANCE;
     this.reduced = opts.reducedMotion ?? false;
 
@@ -216,7 +209,7 @@ export class LogGraphScene {
     this.scene.add(this.world);
 
     this.dimBodyMat = new THREE.MeshToonMaterial({
-      color: DEFAULT_SCENE_APPEARANCE.dim.day.body,
+      color: DEFAULT_SCENE_APPEARANCE.dim.body,
       gradientMap: this.kit.toonGradient,
     });
 
@@ -245,11 +238,6 @@ export class LogGraphScene {
   }
 
   // ───────────────────────── public API ─────────────────────────
-
-  setTheme(theme: SceneTheme) {
-    this.theme = theme;
-    this.applyTheme();
-  }
 
   /** Switch theme colours; decorations that change the balls rebuild them without a replay. */
   setAppearance(appearance: SceneAppearance) {
@@ -461,7 +449,7 @@ export class LogGraphScene {
   }
 
   private applyTheme() {
-    const dim = this.appearance.dim[this.theme];
+    const dim = this.appearance.dim;
     this.hullMat.color.set(this.appearance.outline);
     this.selOuter.color.set(this.appearance.selection.outer);
     this.selInner.color.set(this.appearance.selection.inner);
@@ -702,7 +690,7 @@ export class LogGraphScene {
   /** `snap`：重建後立刻套用（不要讓已淡化的 node 又從全尺寸慢慢縮回去）。 */
   private applyFocus(snap = false) {
     const { active, edges } = this.focus;
-    const dim = this.appearance.dim[this.theme];
+    const dim = this.appearance.dim;
     const outline = this.appearance.outline;
     for (const a of this.actors) {
       const dimmed = active !== null && !active.has(a.node.sha);

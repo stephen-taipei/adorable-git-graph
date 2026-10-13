@@ -26,8 +26,9 @@ import { GitGraphCanvas } from './GitGraphCanvas';
 import type { GitGraphCanvasHandle } from './GitGraphCanvas';
 import { Mascot } from './Mascot';
 import { Toolbar } from './Toolbar';
-import { DEFAULT_THEME, themeAppearance } from '../themes/config';
-import type { ThemeId } from '../themes/config';
+import { AUTO_SCHEME, DEFAULT_THEME, resolveScheme, themeAppearance } from '../themes/config';
+import type { SchemeSetting, ThemeId } from '../themes/config';
+import type { SceneAppearance } from '../scene/LogGraphScene';
 import { CoverageNotice, DiagnosticsPanel } from './DiagnosticsPanel';
 import type { CommitInspection } from './DiagnosticsPanel';
 import { useElementSize, usePrefersDark, usePrefersReducedMotion } from './hooks';
@@ -49,8 +50,11 @@ export interface GitGraphViewerProps {
   /** 例如 `owner/repo` */
   title: string;
   state: ViewerState;
-  /** Colour mode (day / night); 'auto' follows the system. */
-  theme?: 'day' | 'night' | 'auto';
+  /**
+   * Colour scheme: 'auto' follows the system, otherwise a scheme id of the theme
+   * (see themes/config.ts). The legacy 'day' / 'night' pick that tone's default scheme.
+   */
+  theme?: SchemeSetting;
   /** Visual theme (see themes/config.ts); its stylesheet must be loaded by the host. */
   themeId?: ThemeId;
   locale?: Locale;
@@ -135,7 +139,7 @@ function intersect(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null)
 export function GitGraphViewer({
   title,
   state,
-  theme = 'auto',
+  theme = AUTO_SCHEME,
   themeId = DEFAULT_THEME,
   locale,
   onRefresh,
@@ -159,7 +163,7 @@ export function GitGraphViewer({
     }
   });
   const reducedMotion = systemReducedMotion || animationOff;
-  const sceneTheme = theme === 'auto' ? (prefersDark ? 'night' : 'day') : theme;
+  const scheme = resolveScheme(themeId, theme, prefersDark);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -242,6 +246,15 @@ export function GitGraphViewer({
   const [scrollbarW, setScrollbarW] = useState(0);
 
   const appearance = themeAppearance(themeId);
+  const sceneAppearance = useMemo<SceneAppearance>(
+    () => ({
+      outline: appearance.outline,
+      selection: appearance.selection,
+      dim: scheme.dim,
+      topper: appearance.topper,
+    }),
+    [appearance, scheme],
+  );
   const sourceLayout = state.kind === 'ready' ? state.layout : null;
   const layout = useMemo(
     () => (sourceLayout ? recolorLayout(sourceLayout, appearance.palette) : null),
@@ -710,7 +723,8 @@ export function GitGraphViewer({
     <div
       className="agg-root"
       ref={rootRef}
-      data-theme={sceneTheme}
+      data-theme={scheme.tone}
+      data-scheme={scheme.id}
       data-theme-id={themeId}
       data-reduced-motion={reducedMotion ? '' : undefined}
       data-size={metrics.size}
@@ -897,8 +911,7 @@ export function GitGraphViewer({
                   <GitGraphCanvas
                     layout={layout}
                     metrics={metrics}
-                    theme={sceneTheme}
-                    appearance={appearance}
+                    appearance={sceneAppearance}
                     scrollerRef={scrollerRef}
                     trackRef={trackRef}
                     selectedSha={selectedNode ? selectedNode.sha : null}

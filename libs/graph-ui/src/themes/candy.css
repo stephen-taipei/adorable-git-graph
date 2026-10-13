@@ -49,7 +49,7 @@
   --agg-blob-shadow: rgba(43, 33, 64, 0.22);
 }
 
-:where(.agg-root, .agg-theme-scope)[data-theme-id='candy'][data-theme='night'] {
+:where(.agg-root, .agg-theme-scope)[data-theme-id='candy'][data-scheme='dark'] {
   --agg-sky-a: #1e1a4d;
   --agg-sky-b: #3a2d7c;
   --agg-sky-c: #55338f;
@@ -68,6 +68,6 @@ html[data-theme-id='candy'] body {
   background: #bfe7ff;
 }
 
-html[data-theme-id='candy'][data-theme='night'] body {
+html[data-theme-id='candy'][data-scheme='dark'] body {
   background: #1e1a4d;
 }

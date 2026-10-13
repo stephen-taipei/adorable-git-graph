@@ -53,7 +53,7 @@
   --agg-bat: rgba(42, 22, 54, 0.2);
 }
 
-:where(.agg-root, .agg-theme-scope)[data-theme-id='halloween'][data-theme='night'] {
+:where(.agg-root, .agg-theme-scope)[data-theme-id='halloween'][data-scheme='dark'] {
   --agg-ink: #ffb25c;
   --agg-paper: #160c22;
   --agg-danger: #ff5d73;
@@ -116,7 +116,7 @@
     radial-gradient(ellipse 6px 3px at 70% 32%, var(--agg-bat) 98%, transparent);
 }
 
-.agg-root[data-theme-id='halloween'][data-theme='night'] .agg-title-text {
+.agg-root[data-theme-id='halloween'][data-scheme='dark'] .agg-title-text {
   text-shadow: 0 0 12px var(--agg-moon-glow);
 }
 
@@ -149,6 +149,6 @@ html[data-theme-id='halloween'] body {
   background: #ffe9cf;
 }
 
-html[data-theme-id='halloween'][data-theme='night'] body {
+html[data-theme-id='halloween'][data-scheme='dark'] body {
   background: #120a1f;
 }
