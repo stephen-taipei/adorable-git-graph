@@ -115,7 +115,8 @@ body {
   appearance: none;
   width: auto;
   min-width: 0;
-  max-width: min(360px, 100%);
+  /* 留一顆 icon 按鈕（34px + gap）的位置：窄螢幕時＋跟選單同一行，不會自己佔一整行 */
+  max-width: min(360px, calc(100% - 42px));
   padding: 4px 32px 4px 14px;
   font: inherit;
   font-size: 13px;

@@ -1328,6 +1328,7 @@
     max-height: none;
     overflow-x: auto;
     overflow-y: hidden;
+    scrollbar-width: none;
   }
   .agg-root .agg-branch {
     flex: none;
@@ -1668,6 +1669,22 @@
   min-width: 0;
 }
 @media (max-width: 520px) {
+  /* Phones: coverage stays one scrollable line so the commit list keeps its rows. */
+  .agg-diag-coverage,
+  .agg-diagnostics {
+    margin: 4px 10px 0;
+  }
+  .agg-diag-coverage {
+    flex-wrap: nowrap;
+    padding: 4px 10px;
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .agg-diag-toggle {
+    padding: 5px 10px;
+  }
   .agg-diagnostics {
     max-height: 36%;
   }
