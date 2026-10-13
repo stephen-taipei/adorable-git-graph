@@ -2275,7 +2275,24 @@ try {
         await closeOverlay();
         await page.reload();
         await page.locator('.agg-fab').waitFor({ timeout: 10_000 });
+        // 第一次 render 就要是「關閉動畫」：.agg-root 一出現就帶 data-reduced-motion（不能先動一下才關）
+        await page.evaluate(() => {
+          const sr = document.getElementById('adorable-git-graph-host').shadowRoot;
+          window.__aggFirstMotion = null;
+          const mo = new MutationObserver(() => {
+            const root = sr.querySelector('.agg-root');
+            if (!root) return;
+            window.__aggFirstMotion = root.hasAttribute('data-reduced-motion');
+            mo.disconnect();
+          });
+          mo.observe(sr, { childList: true, subtree: true });
+        });
         await openOverlay();
+        assert.equal(
+          await page.evaluate(() => window.__aggFirstMotion),
+          true,
+          'the very first render already has animations off',
+        );
         await eventually(pressed, 'true', 'still off after a page reload');
         await toggle().click();
         await eventually(pressed, 'false', 'back on');
