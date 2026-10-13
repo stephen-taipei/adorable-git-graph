@@ -1759,7 +1759,7 @@ try {
       await page.keyboard.type('gts rate/limit jk', { delay: 10 });
       await page.keyboard.press('Enter');
       await page.keyboard.press('Shift+Enter');
-      await page.keyboard.press('Control+a');
+      await page.keyboard.press('ControlOrMeta+a'); // macOS 是 Cmd+A
       await page.keyboard.press('Backspace');
       await page.keyboard.type('feat');
       await page.keyboard.press('Escape'); // 清掉搜尋

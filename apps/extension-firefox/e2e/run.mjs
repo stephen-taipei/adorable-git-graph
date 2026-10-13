@@ -93,6 +93,8 @@ const waitUntil = async (cond, timeout = 20_000, what = 'condition') => {
   }
 };
 /** 反覆讀取 `read()` 直到等於 expected（deepStrictEqual）；逾時就丟出「預期 / 實際」。 */
+// 全選的修飾鍵：macOS 是 Cmd+A（Ctrl+A 在 macOS 的輸入框只會把游標移到行首，字會打在舊內容前面）
+const SELECT_ALL = process.platform === 'darwin' ? 'Meta' : 'Control';
 const eventually = async (read, expected, label, timeout = 12_000) => {
   const t = Date.now();
   for (;;) {
@@ -444,7 +446,7 @@ try {
   /** 真的用鍵盤把搜尋框的內容換成 q（全選再打字；q 為空就刪除）。 */
   const fillSearch = async (q) => {
     await focusSearch();
-    await chord(page, ['Control'], 'a');
+    await chord(page, [SELECT_ALL], 'a');
     if (q) await page.keyboard.type(q);
     else await page.keyboard.press('Backspace');
   };
@@ -2035,7 +2037,7 @@ try {
       await page.keyboard.type('gts rate/limit jk', { delay: 10 });
       await page.keyboard.press('Enter');
       await chord(page, ['Shift'], 'Enter');
-      await chord(page, ['Control'], 'a');
+      await chord(page, [SELECT_ALL], 'a');
       await page.keyboard.press('Backspace');
       await page.keyboard.type('feat');
       await page.keyboard.press('Escape'); // 清掉搜尋
