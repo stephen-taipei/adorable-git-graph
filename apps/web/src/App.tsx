@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { GitGraphViewer } from '@adorable/graph-ui';
+import { DEFAULT_THEME, GitGraphViewer, THEME_IDS, isThemeId } from '@adorable/graph-ui';
+import type { ThemeId } from '@adorable/graph-ui';
 import { SourceBar, isThemeSetting } from './SourceBar';
 import { TokenDialog } from './TokenDialog';
 import { searchFromSource, sourceFromSearch } from './source';
@@ -8,6 +9,7 @@ import { useStored } from './storage';
 import { locale, t } from './i18n';
 import { clearGitHubCache, useGraphSource } from './useGraphSource';
 import { DEFAULT_REPO } from './protocol';
+import { useThemeStylesheet } from './useThemeStylesheet';
 import {
   AuthConflict,
   GENERATION_KEY,
@@ -18,6 +20,25 @@ import {
   saveCredential,
   syncAuth,
 } from './authScope';
+
+const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈' };
+const THEME_ID_LABEL: Record<ThemeId, string> = {
+  candy: t.themeIdCandy,
+  hacker: t.themeIdHacker,
+};
+
+function usePrefersDark(): boolean {
+  const query = '(prefers-color-scheme: dark)';
+  const [dark, setDark] = useState(() => window.matchMedia?.(query).matches ?? false);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const onChange = () => setDark(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return dark;
+}
 
 function useSource(): [Source, (s: Source) => void] {
   const [source, setSource] = useState<Source>(() => sourceFromSearch(location.search));
@@ -41,7 +62,18 @@ export function App() {
   const lastLocal = useRef<Source>({ kind: 'local' });
   // 靜態建置只有預設 repo：網址裡的 ?local= 不用帶回去
   if (source.kind === 'local') lastLocal.current = import.meta.env.DEV ? source : { kind: 'local' };
+  // `agg.theme` keeps its historical meaning: the light/dark mode setting.
   const [theme, setTheme] = useStored('agg.theme', 'auto', isThemeSetting);
+  const [themeId, setThemeId] = useStored('agg.theme-id', DEFAULT_THEME, isThemeId);
+  const activeThemeId = useThemeStylesheet(themeId, {
+    loading: t.themeLoading,
+    failed: t.themeFailed,
+    retry: t.themeRetry,
+  });
+  // The viewer switches to a new theme only once its stylesheet has loaded.
+  const viewerThemeId = activeThemeId ?? themeId;
+  const prefersDark = usePrefersDark();
+  const mode = theme === 'auto' ? (prefersDark ? 'night' : 'day') : theme;
   const [auth, setAuth] = useState(initialAuth);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
@@ -111,13 +143,21 @@ export function App() {
     document.documentElement.lang = locale;
   }, [title]);
 
+  // Page-level theme hooks (body background) follow the applied theme only.
+  useEffect(() => {
+    const html = document.documentElement;
+    if (activeThemeId) html.dataset['themeId'] = activeThemeId;
+    html.dataset['theme'] = mode;
+  }, [activeThemeId, mode]);
+
   return (
-    <div className="web-root">
+    <div className="web-root agg-theme-scope" data-theme-id={viewerThemeId} data-theme={mode}>
       <GitGraphViewer
         title={title}
         state={state}
         diagnostics={diagnostics}
         theme={theme === 'auto' ? 'auto' : theme}
+        themeId={viewerThemeId}
         locale={locale}
         sourceKey={sourceKey}
         viewerStateKey={viewerStateKey}
@@ -133,6 +173,19 @@ export function App() {
             onNavigate={navigate}
             theme={theme}
             onThemeChange={setTheme}
+            themeExtra={
+              <button
+                type="button"
+                className="web-icon web-skin"
+                title={THEME_ID_LABEL[themeId]}
+                aria-label={THEME_ID_LABEL[themeId]}
+                onClick={() =>
+                  setThemeId(THEME_IDS[(THEME_IDS.indexOf(themeId) + 1) % THEME_IDS.length]!)
+                }
+              >
+                <span aria-hidden="true">{THEME_ID_ICON[themeId]}</span>
+              </button>
+            }
           />
         }
       />
@@ -140,6 +193,7 @@ export function App() {
         <TokenDialog
           key={dialogRevision}
           token={token}
+          themeId={viewerThemeId}
           error={tokenError}
           onClose={() => setTokenOpen(false)}
           onSave={(next) => {

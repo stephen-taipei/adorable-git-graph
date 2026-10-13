@@ -12,8 +12,27 @@ import type { CanvasWindow, LogMetrics } from './geometry';
 
 export type SceneTheme = 'day' | 'night';
 
+/** Theme-dependent scene colours and decorations (see themes/config.ts). */
+export interface SceneAppearance {
+  readonly outline: string;
+  readonly selection: { readonly outer: string; readonly inner: string };
+  readonly dim: Readonly<Record<SceneTheme, { readonly body: string; readonly outline: string }>>;
+  readonly horns: boolean;
+}
+
+export const DEFAULT_SCENE_APPEARANCE: SceneAppearance = {
+  outline: OUTLINE_COLOR,
+  selection: { outer: OUTLINE_COLOR, inner: '#ffd23f' },
+  dim: {
+    day: { body: '#e6e1f1', outline: '#bcb3d8' },
+    night: { body: '#6a5fa8', outline: '#8479c4' },
+  },
+  horns: false,
+};
+
 export interface SceneOptions {
   theme?: SceneTheme;
+  appearance?: SceneAppearance;
   /** 尊重 prefers-reduced-motion：不播放進場動畫與閒置晃動。 */
   reducedMotion?: boolean;
 }
@@ -31,14 +50,9 @@ const BASE_RADIUS = 0.62;
 const FACE_Z = 0.03;
 const FALLBACK_VIEW_H = 640;
 
-const DIM = {
-  day: { body: '#e6e1f1', outline: '#bcb3d8' },
-  night: { body: '#6a5fa8', outline: '#8479c4' },
-} as const;
-
 interface Extra {
   sprite: THREE.Sprite;
-  kind: 'crown' | 'sparkle' | 'sweat' | 'sprout';
+  kind: 'crown' | 'sparkle' | 'sweat' | 'sprout' | 'horns';
   base: THREE.Vector3;
 }
 
@@ -128,11 +142,11 @@ export class LogGraphScene {
   private readonly ringGeo = new THREE.RingGeometry(0.92, 1, 40);
   private readonly selGeo = new THREE.RingGeometry(0.84, 1, 48);
   private readonly hullMat = new THREE.MeshBasicMaterial({
-    color: OUTLINE_COLOR,
+    color: DEFAULT_SCENE_APPEARANCE.outline,
     side: THREE.BackSide,
   });
   private readonly dimHullMat = new THREE.MeshBasicMaterial({
-    color: DIM.day.outline,
+    color: DEFAULT_SCENE_APPEARANCE.dim.day.outline,
     side: THREE.BackSide,
   });
   private readonly dimBodyMat: THREE.MeshToonMaterial;
@@ -162,6 +176,7 @@ export class LogGraphScene {
   private paused = false;
   private disposed = false;
   private theme: SceneTheme;
+  private appearance: SceneAppearance;
   private reduced: boolean;
 
   private replayEnd = 0;
@@ -178,6 +193,7 @@ export class LogGraphScene {
   constructor(host: HTMLElement, opts: SceneOptions = {}) {
     this.host = host;
     this.theme = opts.theme ?? 'day';
+    this.appearance = opts.appearance ?? DEFAULT_SCENE_APPEARANCE;
     this.reduced = opts.reducedMotion ?? false;
 
     this.renderer = new THREE.WebGLRenderer({
@@ -199,13 +215,19 @@ export class LogGraphScene {
     this.scene.add(this.world);
 
     this.dimBodyMat = new THREE.MeshToonMaterial({
-      color: DIM.day.body,
+      color: DEFAULT_SCENE_APPEARANCE.dim.day.body,
       gradientMap: this.kit.toonGradient,
     });
 
     // 選取環：深色外環 + 黃色內環，會輕輕脈動
-    this.selOuter = new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, depthWrite: false });
-    this.selInner = new THREE.MeshBasicMaterial({ color: '#ffd23f', depthWrite: false });
+    this.selOuter = new THREE.MeshBasicMaterial({
+      color: this.appearance.selection.outer,
+      depthWrite: false,
+    });
+    this.selInner = new THREE.MeshBasicMaterial({
+      color: this.appearance.selection.inner,
+      depthWrite: false,
+    });
     const outer = new THREE.Mesh(this.selGeo, this.selOuter);
     outer.scale.setScalar(1.06);
     const inner = new THREE.Mesh(this.selGeo, this.selInner);
@@ -225,6 +247,18 @@ export class LogGraphScene {
 
   setTheme(theme: SceneTheme) {
     this.theme = theme;
+    this.applyTheme();
+  }
+
+  /** Switch theme colours; decorations that change the balls rebuild them without a replay. */
+  setAppearance(appearance: SceneAppearance) {
+    const rebuild = appearance.horns !== this.appearance.horns;
+    this.appearance = appearance;
+    if (rebuild && this.layout) {
+      const keep = new Map(this.actors.map((a) => [a.node.sha, a]));
+      this.rebuild(keep);
+      this.applyWindow(true);
+    }
     this.applyTheme();
   }
 
@@ -426,7 +460,10 @@ export class LogGraphScene {
   }
 
   private applyTheme() {
-    const dim = DIM[this.theme];
+    const dim = this.appearance.dim[this.theme];
+    this.hullMat.color.set(this.appearance.outline);
+    this.selOuter.color.set(this.appearance.selection.outer);
+    this.selInner.color.set(this.appearance.selection.inner);
     this.dimBodyMat.color.set(dim.body);
     this.dimHullMat.color.set(dim.outline);
     this.applyFocus();
@@ -617,6 +654,9 @@ export class LogGraphScene {
       extras.push({ sprite, kind, base: sprite.position.clone() });
     };
 
+    // Little devil horns sit on the upper rim of the ball, under any crown.
+    if (this.appearance.horns)
+      addExtra('horns', this.kit.horns, radius * 1.7, radius * 0.62, 0, radius * 0.86);
     if (node.kind === 'root') addExtra('sprout', this.kit.sprout, 0.62, 0.62, 0, radius + 0.16);
     if (node.isHead) addExtra('crown', this.kit.crown, 0.78, 0.62, 0.02, radius + 0.17);
     if (node.kind === 'feat')
@@ -658,7 +698,8 @@ export class LogGraphScene {
   /** `snap`：重建後立刻套用（不要讓已淡化的 node 又從全尺寸慢慢縮回去）。 */
   private applyFocus(snap = false) {
     const { active, edges } = this.focus;
-    const dim = DIM[this.theme];
+    const dim = this.appearance.dim[this.theme];
+    const outline = this.appearance.outline;
     for (const a of this.actors) {
       const dimmed = active !== null && !active.has(a.node.sha);
       a.dim = dimmed;
@@ -675,7 +716,7 @@ export class LogGraphScene {
         !(active.has(e.child.node.sha) && active.has(e.parent.node.sha));
       const u = e.material.uniforms;
       (u['uColor']!.value as THREE.Color).set(dimmed ? dim.body : e.baseColor);
-      (u['uOutline']!.value as THREE.Color).set(dimmed ? dim.outline : OUTLINE_COLOR);
+      (u['uOutline']!.value as THREE.Color).set(dimmed ? dim.outline : outline);
       u['uChevron']!.value = dimmed ? 0 : 1;
     }
   }
@@ -842,6 +883,8 @@ export class LogGraphScene {
           const sc = 0.36 * (0.8 + 0.3 * Math.sin(this.t * 4 + a.phase) * motion);
           ex.sprite.scale.set(sc, sc, 1);
           ex.sprite.material.rotation = this.t * 0.8 * motion;
+        } else if (ex.kind === 'horns') {
+          ex.sprite.position.y = ex.base.y + Math.abs(w) * 0.03;
         } else if (ex.kind === 'sweat') {
           ex.sprite.position.y = ex.base.y - ((this.t * 0.5 + a.phase) % 1) * 0.12 * motion;
         } else {

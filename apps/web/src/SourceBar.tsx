@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { localSource, parseRepoInput } from './source';
 import type { Source } from './source';
 import { DEFAULT_REPO } from './protocol';
@@ -25,6 +25,7 @@ export function SourceBar({
   onNavigate,
   theme,
   onThemeChange,
+  themeExtra,
 }: {
   source: Source;
   /** 最近一次看的本機 repo：從 GitHub 切回「本機」時回到它，而不是預設 repo */
@@ -32,6 +33,8 @@ export function SourceBar({
   onNavigate: (s: Source) => void;
   theme: ThemeSetting;
   onThemeChange: (t: ThemeSetting) => void;
+  /** 主題（skin）切換：緊接在明暗按鈕後面 */
+  themeExtra?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(
@@ -120,6 +123,7 @@ export function SourceBar({
       >
         {THEME_ICON[theme]}
       </button>
+      {themeExtra}
     </div>
   );
 }

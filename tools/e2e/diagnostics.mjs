@@ -14,6 +14,7 @@ import { inkRatio } from './pixels.mjs';
 import { cleanupViewerScope, prepareViewerScope, verifyViewerScope } from './viewer-scope.mjs';
 import { buildLanBundle, verifyCrossTabAuth, verifyLanHttp } from './app-auth-isolation.mjs';
 import { verifyFirefoxApp } from './app-auth-firefox.mjs';
+import { verifyThemes } from './themes.mjs';
 import { verifyFirefoxCleanup } from './app-auth-firefox-cleanup.mjs';
 import {
   cleanupWebSourceIdentity,
@@ -645,6 +646,7 @@ try {
     await verifyWebSourceIdentity({ page, ctx, api, root });
     await verifyViewerScope(page);
     await verifyAppScope(api);
+    await verifyThemes({ browser, origin: 'http://localhost:4277', artifacts });
     await verifyCrossTabAuth({ browser, api, origin: 'http://localhost:4277', artifacts });
     await verifyLanHttp({
       browser,

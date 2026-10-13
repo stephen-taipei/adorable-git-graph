@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Mascot } from '@adorable/graph-ui';
+import { Mascot, themeAppearance } from '@adorable/graph-ui';
+import type { ThemeId } from '@adorable/graph-ui';
 import { t } from './i18n';
 
 export function TokenDialog({
   token,
+  themeId,
   error,
   onSave,
   onClose,
 }: {
   token: string;
+  themeId: ThemeId;
   error?: string | null;
   onSave: (token: string) => void;
   onClose: () => void;
@@ -45,7 +48,12 @@ export function TokenDialog({
         }}
       >
         <h2>
-          <Mascot size={40} /> {t.tokenTitle}
+          <Mascot
+            size={40}
+            variant={themeAppearance(themeId).mascot}
+            color={themeAppearance(themeId).mascotColor}
+          />{' '}
+          {t.tokenTitle}
         </h2>
         <input
           ref={inputRef}

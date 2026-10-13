@@ -6,8 +6,163 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Adorable Git Graph</title>
+    <!-- Theme-neutral boot screen: covers the app until the chosen theme's
+         stylesheet has loaded (and again while switching themes). No theme
+         asset is requested before the app picks one. -->
+    <style>
+      .agg-boot {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 14px;
+        color: #3a3d48;
+        background: #f4f5f8;
+        font:
+          700 14px/1.4 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        transition:
+          opacity 0.32s ease,
+          visibility 0s linear 0s;
+      }
+      .agg-boot[data-state='done'] {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition:
+          opacity 0.32s ease,
+          visibility 0s linear 0.32s;
+      }
+      .agg-boot-graph {
+        width: 132px;
+        height: 132px;
+        overflow: visible;
+      }
+      .agg-boot-graph path {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 6;
+        stroke-linecap: round;
+        stroke-dasharray: 130;
+        stroke-dashoffset: 130;
+        opacity: 0.35;
+        animation: agg-boot-draw 1.8s ease-in-out infinite;
+      }
+      .agg-boot-graph .agg-boot-branch {
+        animation-delay: 0.3s;
+      }
+      .agg-boot-graph circle {
+        fill: currentColor;
+        transform-box: fill-box;
+        transform-origin: center;
+        transform: scale(0);
+        animation: agg-boot-pop 1.8s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+      }
+      .agg-boot-graph circle:nth-of-type(2) {
+        animation-delay: 0.25s;
+      }
+      .agg-boot-graph circle:nth-of-type(3) {
+        animation-delay: 0.5s;
+      }
+      .agg-boot-graph circle:nth-of-type(4) {
+        animation-delay: 0.75s;
+      }
+      .agg-boot[data-failed] .agg-boot-graph * {
+        animation-play-state: paused;
+      }
+      .agg-boot-label {
+        margin: 0;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+      }
+      .agg-boot-error {
+        display: grid;
+        justify-items: center;
+        gap: 8px;
+        margin: 0;
+      }
+      .agg-boot-error[hidden] {
+        display: none;
+      }
+      .agg-boot-error button {
+        padding: 6px 16px;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 2px solid currentColor;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .agg-boot-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      @keyframes agg-boot-draw {
+        0% {
+          stroke-dashoffset: 130;
+        }
+        45%,
+        70% {
+          stroke-dashoffset: 0;
+        }
+        100% {
+          stroke-dashoffset: -130;
+        }
+      }
+      @keyframes agg-boot-pop {
+        0%,
+        10% {
+          transform: scale(0);
+        }
+        35%,
+        75% {
+          transform: scale(1);
+        }
+        100% {
+          transform: scale(0);
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        .agg-boot {
+          color: #d6d9e3;
+          background: #14161c;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .agg-boot-graph path,
+        .agg-boot-graph circle {
+          animation: none;
+          stroke-dashoffset: 0;
+          transform: none;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="agg-boot" class="agg-boot" data-state="loading" role="status" aria-live="polite">
+      <svg class="agg-boot-graph" viewBox="0 0 100 100" aria-hidden="true">
+        <path d="M34 8 V92" />
+        <path class="agg-boot-branch" d="M34 26 C70 34 70 66 34 74" />
+        <circle cx="34" cy="14" r="8" />
+        <circle cx="62" cy="50" r="8" />
+        <circle cx="34" cy="50" r="6" />
+        <circle cx="34" cy="86" r="8" />
+      </svg>
+      <p class="agg-boot-label">Adorable Git Graph</p>
+      <span class="agg-boot-sr" id="agg-boot-status">Loading…</span>
+      <p class="agg-boot-error" id="agg-boot-error" hidden>
+        <span id="agg-boot-error-text">The theme could not be loaded.</span>
+        <button type="button" id="agg-boot-retry">Retry</button>
+      </p>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

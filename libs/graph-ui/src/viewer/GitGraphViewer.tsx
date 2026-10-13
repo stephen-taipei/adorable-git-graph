@@ -7,6 +7,7 @@ import {
   computeStats,
   isFullSha,
   matchesQuery,
+  recolorLayout,
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphLayout, GraphNode } from '@adorable/graph-core';
 import { detectLocale, formatDuration, formatRelative, getMessages } from '../i18n';
@@ -25,6 +26,8 @@ import { GitGraphCanvas } from './GitGraphCanvas';
 import type { GitGraphCanvasHandle } from './GitGraphCanvas';
 import { Mascot } from './Mascot';
 import { Toolbar } from './Toolbar';
+import { DEFAULT_THEME, themeAppearance } from '../themes/config';
+import type { ThemeId } from '../themes/config';
 import { CoverageNotice, DiagnosticsPanel } from './DiagnosticsPanel';
 import type { CommitInspection } from './DiagnosticsPanel';
 import { useElementSize, usePrefersDark, usePrefersReducedMotion } from './hooks';
@@ -46,7 +49,10 @@ export interface GitGraphViewerProps {
   /** 例如 `owner/repo` */
   title: string;
   state: ViewerState;
+  /** Colour mode (day / night); 'auto' follows the system. */
   theme?: 'day' | 'night' | 'auto';
+  /** Visual theme (see themes/config.ts); its stylesheet must be loaded by the host. */
+  themeId?: ThemeId;
   locale?: Locale;
   onRefresh?: () => void;
   onClose?: () => void;
@@ -130,6 +136,7 @@ export function GitGraphViewer({
   title,
   state,
   theme = 'auto',
+  themeId = DEFAULT_THEME,
   locale,
   onRefresh,
   onClose,
@@ -234,7 +241,12 @@ export function GitGraphViewer({
   const [focusBranch, setFocusBranch] = useState<string | null>(null);
   const [scrollbarW, setScrollbarW] = useState(0);
 
-  const layout = state.kind === 'ready' ? state.layout : null;
+  const appearance = themeAppearance(themeId);
+  const sourceLayout = state.kind === 'ready' ? state.layout : null;
+  const layout = useMemo(
+    () => (sourceLayout ? recolorLayout(sourceLayout, appearance.palette) : null),
+    [sourceLayout, appearance],
+  );
   const hasRows = Boolean(layout && layout.nodes.length > 0);
   useEffect(() => {
     if (!viewerStateKey || !layout || inspectionState.scope !== diagnosticsScope) return;
@@ -699,6 +711,7 @@ export function GitGraphViewer({
       className="agg-root"
       ref={rootRef}
       data-theme={sceneTheme}
+      data-theme-id={themeId}
       data-reduced-motion={reducedMotion ? '' : undefined}
       data-size={metrics.size}
       data-cols={metrics.cols}
@@ -724,7 +737,7 @@ export function GitGraphViewer({
 
       <header className="agg-top">
         <div className="agg-pill agg-title">
-          <Mascot size={26} />
+          <Mascot size={26} variant={appearance.mascot} color={appearance.mascotColor} />
           <span className="agg-title-text">{title}</span>
         </div>
         <div className="agg-pill agg-actions">
@@ -885,6 +898,7 @@ export function GitGraphViewer({
                     layout={layout}
                     metrics={metrics}
                     theme={sceneTheme}
+                    appearance={appearance}
                     scrollerRef={scrollerRef}
                     trackRef={trackRef}
                     selectedSha={selectedNode ? selectedNode.sha : null}
@@ -918,7 +932,12 @@ export function GitGraphViewer({
 
         {state.kind === 'loading' && (
           <div className="agg-center" role="status">
-            <Mascot size={92} className="agg-bounce" />
+            <Mascot
+              size={92}
+              variant={appearance.mascot}
+              color={appearance.mascotColor}
+              className="agg-bounce"
+            />
             <div className="agg-shadow" />
             <div className="agg-msg-title">{t.loading}</div>
             <div className="agg-msg-sub">{t.loadingSub}</div>
@@ -927,7 +946,13 @@ export function GitGraphViewer({
 
         {state.kind === 'error' && (
           <div className="agg-center" role="alert">
-            <Mascot size={92} mood="sad" color="#ff7a8a" className="agg-wobble" />
+            <Mascot
+              size={92}
+              mood="sad"
+              variant={appearance.mascot}
+              color="#ff7a8a"
+              className="agg-wobble"
+            />
             <div className="agg-msg-title">{t.errorTitle}</div>
             <div className="agg-msg-sub">
               {t.errors[state.code] ?? state.message ?? t.errors['unknown']}
