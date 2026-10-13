@@ -1817,12 +1817,20 @@ try {
       let st = await pageState();
       assert.equal(st.overflow, 'hidden', '<html> overflow is locked while the overlay is open');
       assert.equal(st.computed, 'hidden');
-      assert.equal(st.gutter, 'stable', 'scrollbar-gutter keeps the background from shifting');
+      // 只有原本佔寬度的捲軸才需要保留 gutter（見 Overlay.tsx）。macOS 預設是浮動捲軸（不佔寬度），
+      // 這時加 gutter 反而會讓版面位移，所以不加；位移檢查照樣要過。
+      if (process.platform !== 'darwin')
+        assert.ok(
+          closedLayout.scrollbar > 0,
+          'the tall fake page shows a classic scrollbar (needed to detect a background shift)',
+        );
+      if (closedLayout.scrollbar > 0)
+        assert.equal(st.gutter, 'stable', 'scrollbar-gutter keeps the background from shifting');
+      else {
+        assert.equal(st.gutter, '', 'overlay scrollbars take no width: no gutter is added');
+        console.log('  overlay scrollbars (no width): the gutter is not needed');
+      }
       assert.equal(st.y, 0);
-      assert.ok(
-        closedLayout.scrollbar > 0,
-        'the tall fake page shows a classic scrollbar (needed to detect a background shift)',
-      );
       const openLayout = await layout();
       assert.ok(
         Math.abs(openLayout.mainLeft - closedLayout.mainLeft) < 0.5,
