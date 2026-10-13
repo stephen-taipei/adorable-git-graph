@@ -94,6 +94,12 @@ export interface GitGraphViewerProps {
    */
   detailSize?: DetailSize;
   onDetailSizeChange?: (size: DetailSize) => void;
+  /**
+   * 「關閉動畫」開關。給了就是 controlled（要配合 onAnimationOffChange，由使用端決定存在哪裡）；
+   * 沒給就由 viewer 自己記在 localStorage（`agg:animation-off`）。
+   */
+  animationOff?: boolean;
+  onAnimationOffChange?: (off: boolean) => void;
   /** Opaque repo/URL/credential scope for restoring inspection metadata after close/reopen. */
   viewerStateKey?: string;
   diagnostics?: DiagnosticAdapter;
@@ -179,6 +185,8 @@ export function GitGraphViewer({
   history,
   detailSize: detailSizeProp,
   onDetailSizeChange,
+  animationOff: animationOffProp,
+  onAnimationOffChange,
   viewerStateKey,
   diagnostics,
 }: GitGraphViewerProps) {
@@ -186,13 +194,28 @@ export function GitGraphViewer({
   const t = getMessages(loc);
   const prefersDark = usePrefersDark();
   const systemReducedMotion = usePrefersReducedMotion();
-  const [animationOff, setAnimationOff] = useState(() => {
+  const [ownAnimationOff, setOwnAnimationOff] = useState(() => {
+    if (animationOffProp !== undefined) return false;
     try {
       return localStorage.getItem('agg:animation-off') === 'true';
     } catch {
       return false;
     }
   });
+  const animationOff = animationOffProp ?? ownAnimationOff;
+  const controlledAnimationOff = animationOffProp !== undefined;
+  const toggleAnimationOff = useCallback(() => {
+    const next = !animationOff;
+    if (!controlledAnimationOff) {
+      setOwnAnimationOff(next);
+      try {
+        localStorage.setItem('agg:animation-off', String(next));
+      } catch {
+        /* optional */
+      }
+    }
+    onAnimationOffChange?.(next);
+  }, [animationOff, controlledAnimationOff, onAnimationOffChange]);
   const reducedMotion = systemReducedMotion || animationOff;
   const scheme = resolveScheme(themeId, theme, prefersDark);
 
@@ -811,16 +834,7 @@ export function GitGraphViewer({
             aria-pressed={animationOff}
             aria-label={loc === 'zh-TW' ? '關閉動畫' : 'Disable animations'}
             title={loc === 'zh-TW' ? '關閉動畫' : 'Disable animations'}
-            onClick={() =>
-              setAnimationOff((value) => {
-                try {
-                  localStorage.setItem('agg:animation-off', String(!value));
-                } catch {
-                  /* optional */
-                }
-                return !value;
-              })
-            }
+            onClick={toggleAnimationOff}
           >
             ◷
           </button>

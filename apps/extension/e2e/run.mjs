@@ -1845,6 +1845,23 @@ try {
     assert.notEqual(night, 'rgb(255, 253, 247)', 'the list card uses the night colours');
     await assertGraphSync('night');
     await shot(page, '9-night.png');
+    // overlay 開著時在 GitHub 換配色：不用關掉重開就跟著換（同一個 scroller，不重建）
+    await ui((r) => (r.querySelector('.agg-scroll').dataset.aggE2eSame = '1'));
+    await page.evaluate(() => (document.documentElement.dataset.colorMode = 'light'));
+    await page.locator('.agg-root[data-theme="day"]').waitFor();
+    await eventually(
+      () => ui((r) => getComputedStyle(r.querySelector('.agg-main')).backgroundColor),
+      'rgb(255, 253, 247)',
+      'the list card switches to the day colours while open',
+    );
+    await page.evaluate(() => (document.documentElement.dataset.colorMode = 'dark'));
+    await page.locator('.agg-root[data-theme="night"]').waitFor();
+    assert.equal(
+      await ui((r) => r.querySelector('.agg-scroll').dataset.aggE2eSame ?? null),
+      '1',
+      'switching colours live keeps the same scroller',
+    );
+    await assertGraphSync('night after a live switch');
     await closeOverlay();
     await page.evaluate(() => (document.documentElement.dataset.colorMode = 'light'));
     await page.locator('.agg-fab').click();
@@ -2228,6 +2245,54 @@ try {
       await page.evaluate((u) => history.pushState({}, '', new URL(u).pathname), REPO_URL);
       await page.waitForTimeout(2000);
       await page.locator('.agg-fab').waitFor({ timeout: 10_000 });
+    },
+  );
+
+  await step(
+    'animation toggle: remembered in extension storage, not in github.com localStorage (old value migrated)',
+    async () => {
+      const LEGACY = 'agg:animation-off';
+      const toggle = () => page.getByRole('button', { name: /^(關閉動畫|Disable animations)$/ });
+      const pressed = () => toggle().getAttribute('aria-pressed');
+      const stored = () =>
+        sw.evaluate(
+          async () => (await chrome.storage.local.get('animationOff')).animationOff ?? null,
+        );
+      const pageStored = () => page.evaluate((k) => localStorage.getItem(k), LEGACY);
+      try {
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('animationOff'));
+        await page.evaluate((k) => localStorage.removeItem(k), LEGACY);
+        await openOverlay();
+        assert.equal(await pressed(), 'false', 'animations are on by default');
+        await toggle().click();
+        await eventually(pressed, 'true', 'the toggle is pressed');
+        await page.locator('.agg-root[data-reduced-motion]').waitFor();
+        await eventually(stored, true, 'saved in extension storage');
+        assert.equal(await pageStored(), null, 'nothing is written to github.com localStorage');
+        // 重新載入頁面（新的 content script）：仍是關閉
+        await closeOverlay();
+        await page.reload();
+        await page.locator('.agg-fab').waitFor({ timeout: 10_000 });
+        await openOverlay();
+        await eventually(pressed, 'true', 'still off after a page reload');
+        await toggle().click();
+        await eventually(pressed, 'false', 'back on');
+        await eventually(stored, false, 'on saved too');
+
+        // 舊版寫在 github.com localStorage 的值：搬進 extension storage，並從頁面移除
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('animationOff'));
+        await page.evaluate((k) => localStorage.setItem(k, 'true'), LEGACY);
+        await openOverlay();
+        await eventually(pressed, 'true', 'the old setting is picked up');
+        await eventually(stored, true, 'the old setting is migrated');
+        assert.equal(await pageStored(), null, 'the old key is removed from github.com');
+      } finally {
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('animationOff'));
+        await page.evaluate((k) => localStorage.removeItem(k), LEGACY);
+      }
     },
   );
 
