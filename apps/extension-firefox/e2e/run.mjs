@@ -50,6 +50,7 @@ import {
   backgroundHandle,
   chord,
   clickExtByText,
+  dataCollectionConsent,
   clickToolbarButton,
   extensionConsoleErrors,
   fillExt,
@@ -2234,6 +2235,16 @@ try {
       assert.equal(url, `moz-extension://${EXT_UUID}/options.html`);
       await opt.waitForFunction(() => document.readyState === 'complete');
       await fillExt(opt, 'input[type="password"]', 'github_pat_e2e_secret');
+      // 沒有「驗證資訊」的資料收集同意（manifest 的 optional authenticationInfo）：token 不儲存
+      await clickExtByText(opt, 'button', /^(Save|儲存)$/);
+      await opt.waitForFunction(() =>
+        /consent|同意/.test(document.querySelector('output')?.textContent ?? ''),
+      );
+      // 使用者在同意對話框按下允許 → 儲存成功
+      const granted = await dataCollectionConsent(browser, GECKO_ID, 'grant', [
+        'authenticationInfo',
+      ]);
+      assert.ok(granted?.includes('authenticationInfo'), `consent not recorded: ${granted}`);
       await clickExtByText(opt, 'button', /^(Save|儲存)$/);
       await opt.waitForFunction(() =>
         /✓/.test(document.querySelector('output')?.textContent ?? ''),

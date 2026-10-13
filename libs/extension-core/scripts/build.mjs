@@ -36,6 +36,7 @@ export async function buildExtension({ target, appRoot, watch = false, env = pro
   const define = {
     'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'),
     __AGG_API_BASE__: JSON.stringify(apiBase),
+    __AGG_TARGET__: JSON.stringify(target),
   };
   const common = {
     configFile: false,

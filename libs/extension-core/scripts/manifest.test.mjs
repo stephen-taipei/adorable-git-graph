@@ -17,10 +17,11 @@ describe('createManifest', () => {
     expect(m.background.service_worker).toBeUndefined();
     expect(m.minimum_chrome_version).toBeUndefined();
     expect(m.browser_specific_settings.gecko.id).toBe(GECKO_ID);
-    expect(GECKO_ID).toMatch(/^\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}$/);
+    expect(GECKO_ID).toBe('adorable-git-graph@stephen.taipei');
     // data_collection_permissions を宣言しているので、それを理解する最初の版（desktop 140 / Android 142）以上が必須
     expect(m.browser_specific_settings.gecko.data_collection_permissions).toEqual({
-      required: ['none'],
+      required: ['browsingActivity'],
+      optional: ['authenticationInfo'],
     });
     expect(
       Number.parseInt(m.browser_specific_settings.gecko.strict_min_version, 10),

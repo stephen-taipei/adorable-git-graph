@@ -5,6 +5,7 @@ import type { Locale } from '@adorable/graph-ui';
 import { sendToBackground } from '../shared/messages';
 import type { RateLimitResponse } from '../shared/messages';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '../shared/settings';
+import { requestTokenConsent } from '../shared/consent';
 import type { Settings } from '../shared/settings';
 import './options.css';
 
@@ -27,6 +28,7 @@ const T = {
     limit: (r: number, l: number, auth: boolean) =>
       `剩餘 ${r} / ${l} 次（${auth ? '已使用 token' : '未登入'}）`,
     fail: (m: string) => `失敗：${m}`,
+    consent: '沒有同意傳送驗證資訊，token 不會儲存也不會使用。',
   },
   en: {
     title: 'Adorable Git Graph settings',
@@ -46,6 +48,7 @@ const T = {
     limit: (r: number, l: number, auth: boolean) =>
       `${r} / ${l} left (${auth ? 'with token' : 'anonymous'})`,
     fail: (m: string) => `Failed: ${m}`,
+    consent: 'Without consent to send authentication info, the token is not saved or used.',
   },
 } satisfies Record<Locale, unknown>;
 
@@ -66,13 +69,19 @@ function Options() {
   const num = (key: keyof Settings) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setS((p) => ({ ...p, [key]: Number(e.target.value) }));
 
+  /** 有 token 才問（Firefox 的資料收集同意；要在 click 裡、任何 await 之前發出請求） */
+  const consented = (): Promise<boolean> =>
+    s.token.trim() ? requestTokenConsent() : Promise.resolve(true);
+
   const save = async () => {
+    if (!(await consented())) return setStatus(t.consent);
     await saveSettings(s);
     setS(await loadSettings());
     setStatus(t.saved);
   };
 
   const test = async () => {
+    if (!(await consented())) return setStatus(t.consent);
     await saveSettings(s);
     const res = await sendToBackground<RateLimitResponse>({ type: 'rate-limit' });
     setStatus(

@@ -20,6 +20,7 @@ import type {
   TabCommand,
 } from '../shared/messages';
 import { SETTINGS_KEY, loadSettings, type Settings } from '../shared/settings';
+import { hasTokenConsent } from '../shared/consent';
 
 /**
  * GitHub への要求にかける時間の上限。Firefox の background は event page で、アイドルが 30 秒続くと停止する。
@@ -119,11 +120,16 @@ function rotateGeneration() {
     )
     .catch(() => {});
 }
+/** 實際拿來呼叫 API 的設定：Firefox 上沒有「驗證資訊」的資料收集同意時不送 token。 */
+async function loadUsableSettings(): Promise<Settings> {
+  const settings = await loadSettings();
+  return settings.token && !(await hasTokenConsent()) ? { ...settings, token: '' } : settings;
+}
 function readScopedSettings() {
   // Serialize only settings reads/adoption. An older read cannot overwrite a newer snapshot.
   const pending = settingsReads.then(async () => {
     const before = settingsGeneration;
-    const settings = await loadSettings();
+    const settings = await loadUsableSettings();
     assertGeneration(before);
     if (settingsSnapshot && JSON.stringify(settingsSnapshot) !== JSON.stringify(settings))
       rotateGeneration();
@@ -327,7 +333,7 @@ async function fetchMore(
 }
 
 async function rateLimit(): Promise<RateLimitResponse> {
-  const settings = await loadSettings();
+  const settings = await loadUsableSettings();
   try {
     const res = await fetch(`${__AGG_API_BASE__}/rate_limit`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

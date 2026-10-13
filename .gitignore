@@ -9,3 +9,5 @@ coverage
 test-results
 **/e2e/.artifacts
 web-ext-artifacts
+apps/extension/release
+apps/extension/store-assets
