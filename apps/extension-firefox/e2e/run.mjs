@@ -2556,6 +2556,54 @@ try {
   );
 
   await step(
+    'detail size: the wide panel is remembered in extension storage across overlay closes and page reloads',
+    async () => {
+      const pressed = () =>
+        ui((r) => r.querySelector('.agg-detail-size')?.getAttribute('aria-pressed') ?? null);
+      const detailWidth = () =>
+        ui((r) => r.querySelector('.agg-detail').getBoundingClientRect().width);
+      const openDetail = async () => {
+        await openOverlay();
+        await clickRow('m7');
+        await waitFor('.agg-detail');
+        await detailSettled();
+        await settle(150);
+      };
+      const stored = () =>
+        withSettings(async () => (await chrome.storage.local.get('detailSize')).detailSize ?? null);
+      try {
+        await openDetail();
+        assert.equal(await pressed(), 'false', 'starts as the normal panel');
+        const normal = await detailWidth();
+        await click('.agg-detail-size');
+        await settle(300);
+        assert.equal(await pressed(), 'true', 'the toggle is pressed');
+        const wide = await detailWidth();
+        assert.ok(wide > normal + 50, `the panel widens (${normal} → ${wide})`);
+        assert.equal(await stored(), 'wide', 'saved in extension storage');
+        // 關掉再打開 overlay：仍是寬版
+        await closeOverlay();
+        await openDetail();
+        assert.equal(await pressed(), 'true', 'still wide after reopening the overlay');
+        assert.ok(Math.abs((await detailWidth()) - wide) <= 1, 'same width after reopening');
+        // 重新載入頁面（新的 content script）：仍是寬版
+        await closeOverlay();
+        await gotoRepo();
+        await openDetail();
+        assert.equal(await pressed(), 'true', 'still wide after a page reload');
+        await shot('detail-size-wide.png');
+        await click('.agg-detail-size');
+        await settle(300);
+        assert.equal(await pressed(), 'false', 'back to normal');
+        assert.equal(await stored(), 'normal', 'normal saved too');
+      } finally {
+        await withSettings(async () => chrome.storage.local.remove('detailSize'));
+        await closeOverlay();
+      }
+    },
+  );
+
+  await step(
     'no uncaught page errors or console errors (page, event page, options page)',
     async () => {
       // event page / options page 的未捕捉錯誤（content script 的錯誤已由 page 的 console 事件收進 errors）

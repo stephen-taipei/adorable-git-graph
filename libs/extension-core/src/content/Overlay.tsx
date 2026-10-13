@@ -3,6 +3,7 @@ import { ErrorBoundary, GitGraphViewer } from '@adorable/graph-ui';
 import { sendToBackground } from '../shared/messages';
 import type { RepoRef } from '../shared/repo';
 import { useGraph } from './useGraph';
+import { useDetailSize } from './useDetailSize';
 
 function githubTheme(): 'day' | 'night' | 'auto' {
   const mode = document.documentElement.getAttribute('data-color-mode');
@@ -22,6 +23,7 @@ export function Overlay({
     repo,
     epoch,
   );
+  const [detailSize, setDetailSize] = useDetailSize();
   const panelRef = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
 
@@ -129,6 +131,8 @@ export function Overlay({
             onRefresh={refresh}
             onLoadMore={loadMore}
             history={history}
+            detailSize={detailSize}
+            onDetailSizeChange={setDetailSize}
             onClose={onClose}
             onOpenSettings={() => void sendToBackground({ type: 'open-options' })}
           />
