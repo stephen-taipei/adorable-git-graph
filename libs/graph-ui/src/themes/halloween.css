@@ -1,0 +1,154 @@
+/* Halloween — pumpkin orange and witchy purple, with a jack-o'-lantern mascot
+   and little witch hats on the commits. Loaded only while this theme is
+   active. Night is the signature look (a moonlit purple sky); day is a warm
+   autumn parchment with the same accents. */
+
+:where(.agg-root, .agg-theme-scope)[data-theme-id='halloween'] {
+  --agg-font:
+    ui-rounded, 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', 'Nunito', 'Chalkboard SE',
+    'Comic Neue', 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  --agg-ink: #2a1636;
+  --agg-paper: #fff6ea;
+  --agg-pop: #ff8a1f;
+  --agg-danger: #e2364f;
+  --agg-sky-a: #ffe9cf;
+  --agg-sky-b: #efdcff;
+  --agg-sky-c: #fbd6b0;
+  --agg-card: #fffaf2;
+  --agg-card-ink: #2a1636;
+  --agg-card-muted: #75587f;
+  --agg-muted: #75587f;
+  --agg-line: color-mix(in srgb, var(--agg-card-ink) 11%, transparent);
+  --agg-surface: #fff;
+  --agg-surface-muted: #75587f;
+  --agg-tint-a: #ecdcfb;
+  --agg-tint-b: #ffdcb4;
+  --agg-soft-ink: var(--agg-ink);
+  --agg-soft-border: var(--agg-ink);
+  --agg-selected-bg: color-mix(in srgb, var(--agg-pop) 26%, transparent);
+  --agg-selected-bar: var(--agg-ink);
+  --agg-title-ink: var(--agg-ink);
+  --agg-focus: #7a3ff0;
+  --agg-badge-bg: rgba(255, 255, 255, 0.72);
+  --agg-banner-error: #ffd6dc;
+  --agg-banner-bg: #ffe6c7;
+  --agg-on-accent: var(--agg-ink);
+  --agg-invalid: #c21f3c;
+  --agg-backdrop: rgba(42, 22, 54, 0.55);
+  --agg-tag: #ffd08a;
+  --agg-type-chore: #ece4ef;
+  --agg-type-feat: #d6f5c4;
+  --agg-type-fix: #ffd0d6;
+  --agg-type-docs: #d8e4ff;
+  --agg-type-refactor: #e6d4ff;
+  --agg-type-perf: #ffe0b8;
+  --agg-type-test: #e4f3c2;
+  --agg-type-revert: #ffc0c8;
+  --agg-ok: #d6f5c4;
+  --agg-fail: #ffd0d6;
+  --agg-shadow-color: rgba(42, 22, 54, 0.25);
+  --agg-blob-shadow: rgba(42, 22, 54, 0.22);
+  --agg-moon: #fff1c4;
+  --agg-moon-glow: rgba(255, 196, 92, 0.35);
+  --agg-bat: rgba(42, 22, 54, 0.2);
+}
+
+:where(.agg-root, .agg-theme-scope)[data-theme-id='halloween'][data-scheme='dark'] {
+  --agg-ink: #ffb25c;
+  --agg-paper: #160c22;
+  --agg-danger: #ff5d73;
+  --agg-sky-a: #120a1f;
+  --agg-sky-b: #3d1d5c;
+  --agg-sky-c: #1d0f2e;
+  --agg-card: #1f1230;
+  --agg-card-ink: #f6e9ff;
+  --agg-card-muted: #bba3d6;
+  --agg-muted: #bba3d6;
+  --agg-surface: #261638;
+  --agg-surface-muted: #bba3d6;
+  --agg-tint-a: #34204c;
+  --agg-tint-b: #4a2a18;
+  --agg-soft-ink: #ffb25c;
+  --agg-soft-border: #a8662a;
+  --agg-selected-bg: rgba(255, 138, 31, 0.18);
+  --agg-selected-bar: #ff8a1f;
+  --agg-title-ink: #ff9a3c;
+  --agg-focus: #c9a2ff;
+  --agg-badge-bg: rgba(255, 255, 255, 0.55);
+  --agg-banner-error: #3f1020;
+  --agg-banner-bg: #3a2210;
+  --agg-on-accent: #1a0d05;
+  --agg-invalid: #ff5d73;
+  --agg-backdrop: rgba(6, 2, 12, 0.72);
+  --agg-tag: #4a2a10;
+  --agg-type-chore: #251a30;
+  --agg-type-feat: #1d3a14;
+  --agg-type-fix: #3f1420;
+  --agg-type-docs: #172442;
+  --agg-type-refactor: #2e1a4a;
+  --agg-type-perf: #42290f;
+  --agg-type-test: #283a12;
+  --agg-type-revert: #3f1018;
+  --agg-ok: #1d3a14;
+  --agg-fail: #3f1420;
+  --agg-shadow-color: rgba(255, 138, 31, 0.14);
+  --agg-blob-shadow: rgba(255, 138, 31, 0.2);
+  --agg-moon: #fff3c9;
+  --agg-moon-glow: rgba(255, 214, 120, 0.35);
+  --agg-bat: rgba(8, 3, 14, 0.75);
+}
+
+/* Moon in the corner and a few bats against the sky. */
+.agg-root[data-theme-id='halloween'] .agg-sky::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 88% 14%,
+      var(--agg-moon) 0 34px,
+      var(--agg-moon-glow) 36px,
+      transparent 90px
+    ),
+    radial-gradient(ellipse 9px 4px at 74% 24%, var(--agg-bat) 98%, transparent),
+    radial-gradient(ellipse 7px 3px at 79% 30%, var(--agg-bat) 98%, transparent),
+    radial-gradient(ellipse 6px 3px at 70% 32%, var(--agg-bat) 98%, transparent);
+}
+
+.agg-root[data-theme-id='halloween'][data-scheme='dark'] .agg-title-text {
+  text-shadow: 0 0 12px var(--agg-moon-glow);
+}
+
+/* A bat that flaps next to the title; still when motion is reduced. */
+.agg-root[data-theme-id='halloween'] .agg-title-text::after {
+  content: '🦇';
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.8em;
+  animation: agg-halloween-flap 1.6s ease-in-out infinite;
+}
+
+.agg-root[data-theme-id='halloween'][data-reduced-motion] .agg-title-text::after {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agg-root[data-theme-id='halloween'] .agg-title-text::after {
+    animation: none;
+  }
+}
+
+@keyframes agg-halloween-flap {
+  50% {
+    transform: translateY(-3px) scaleX(0.82);
+  }
+}
+
+html[data-theme-id='halloween'] body {
+  background: #ffe9cf;
+}
+
+html[data-theme-id='halloween'][data-scheme='dark'] body {
+  background: #120a1f;
+}

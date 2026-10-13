@@ -51,6 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
       <div
         className="agg-root"
         data-theme="day"
+        data-scheme="light"
         data-theme-id="candy"
         tabIndex={-1}
         style={{ minHeight: 320 }}

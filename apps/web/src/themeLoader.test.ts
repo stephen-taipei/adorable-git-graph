@@ -5,6 +5,9 @@ import { THEME_IDS } from '@adorable/graph-ui';
 
 vi.mock('@adorable/graph-ui/themes/candy.css?url', () => ({ default: '/themes/candy.css' }));
 vi.mock('@adorable/graph-ui/themes/hacker.css?url', () => ({ default: '/themes/hacker.css' }));
+vi.mock('@adorable/graph-ui/themes/halloween.css?url', () => ({
+  default: '/themes/halloween.css',
+}));
 
 const { THEME_LINK_ID, THEME_STYLESHEETS, loadThemeStylesheet } = await import('./themeLoader');
 

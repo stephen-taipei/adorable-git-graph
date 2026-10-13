@@ -2824,19 +2824,19 @@ try {
   );
 
   await step(
-    'theme toggle cycles auto → day → night, persists across reloads, and the graph follows',
+    'colour scheme toggle cycles auto → light → dark, persists across reloads, and the graph follows',
     async () => {
       const toggle = page.locator('.web-theme');
       await replayDone();
       const dayBg = (await graphSync('day theme')).samples[0].bg;
-      await toggle.click(); // day
-      await page.locator('.agg-root[data-theme="day"]').waitFor();
-      assert.equal(await page.evaluate(() => localStorage.getItem('agg.theme')), 'day');
-      await toggle.click(); // night
-      await page.locator('.agg-root[data-theme="night"]').waitFor();
-      assert.equal(await page.evaluate(() => localStorage.getItem('agg.theme')), 'night');
+      await toggle.click(); // light
+      await page.locator('.agg-root[data-theme="day"][data-scheme="light"]').waitFor();
+      assert.equal(await page.evaluate(() => localStorage.getItem('agg.theme')), 'light');
+      await toggle.click(); // dark
+      await page.locator('.agg-root[data-theme="night"][data-scheme="dark"]').waitFor();
+      assert.equal(await page.evaluate(() => localStorage.getItem('agg.theme')), 'dark');
       await page.reload();
-      await page.locator('.agg-root[data-theme="night"]').waitFor();
+      await page.locator('.agg-root[data-theme="night"][data-scheme="dark"]').waitFor();
       await replayDone();
       await sleep(1000);
       await page.mouse.move(720, 8);

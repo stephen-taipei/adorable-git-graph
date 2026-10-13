@@ -51,7 +51,7 @@
   --agg-scan: rgba(8, 48, 42, 0.04);
 }
 
-:where(.agg-root, .agg-theme-scope)[data-theme-id='hacker'][data-theme='night'] {
+:where(.agg-root, .agg-theme-scope)[data-theme-id='hacker'][data-scheme='dark'] {
   --agg-ink: #2dffc4;
   --agg-paper: #061310;
   --agg-pop: #39ff88;
@@ -140,6 +140,6 @@ html[data-theme-id='hacker'] body {
   background: #e6fff5;
 }
 
-html[data-theme-id='hacker'][data-theme='night'] body {
+html[data-theme-id='hacker'][data-scheme='dark'] body {
   background: #020605;
 }
