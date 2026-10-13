@@ -52,6 +52,7 @@ import {
   SPECS,
   faults,
   gate,
+  isMoreRequest,
   releaseHeld,
   seen,
   sha as mockSha,
@@ -556,8 +557,8 @@ try {
       }),
     );
   const rowLoc = (sha, pg = page) => pg.locator(`.agg-commit[data-sha="${sha}"]`);
-  const selectedSha = () =>
-    page.evaluate(() => document.querySelector('.agg-commit[data-selected]')?.dataset.sha ?? null);
+  const selectedSha = (pg = page) =>
+    pg.evaluate(() => document.querySelector('.agg-commit[data-selected]')?.dataset.sha ?? null);
   const dimmedShas = async () => (await domRows()).filter((r) => r.dim).map((r) => r.sha);
   const litShas = async () => (await domRows()).filter((r) => !r.dim).map((r) => r.sha);
   const sameSet = (a, b) => a.length === b.length && new Set([...a, ...b]).size === a.length;
@@ -569,22 +570,23 @@ try {
       `${what}: expected ${want.length} lit rows, got ${got.length} (missing ${want.filter((s) => !got.includes(s)).length}, extra ${got.filter((s) => !want.includes(s)).length})`,
     );
   };
-  const waitSelected = async (sha, what = '') => {
-    await waitUntil(async () => (await selectedSha()) === sha, 10_000, `selected ${what}`).catch(
+  const waitSelected = async (sha, what = '', pg = page) => {
+    await waitUntil(async () => (await selectedSha(pg)) === sha, 10_000, `selected ${what}`).catch(
       () => {},
     );
-    assert.equal(await selectedSha(), sha, `selected row (${what})`);
+    assert.equal(await selectedSha(pg), sha, `selected row (${what})`);
   };
 
   // ── 捲動 ──
-  const scrollTopNow = () => page.evaluate(() => document.querySelector('.agg-scroll').scrollTop);
+  const scrollTopNow = (pg = page) =>
+    pg.evaluate(() => document.querySelector('.agg-scroll').scrollTop);
   /** 等平滑捲動結束（scrollTop 連續 3 次輪詢都沒變）。 */
-  const settleScroll = async () => {
+  const settleScroll = async (pg = page) => {
     let last = NaN;
     let same = 0;
     const t = Date.now();
     while (same < 3) {
-      const cur = await scrollTopNow();
+      const cur = await scrollTopNow(pg);
       same = cur === last ? same + 1 : 0;
       last = cur;
       if (Date.now() - t > 20_000) throw new Error('scroll never settled');
@@ -592,14 +594,14 @@ try {
     }
     return last;
   };
-  const scrollTo = async (top) => {
-    await page.evaluate((t) => {
+  const scrollTo = async (top, pg = page) => {
+    await pg.evaluate((t) => {
       document.querySelector('.agg-scroll').scrollTop = t;
     }, top);
-    return settleScroll();
+    return settleScroll(pg);
   };
-  const scrollMax = () =>
-    page.evaluate(() => {
+  const scrollMax = (pg = page) =>
+    pg.evaluate(() => {
       const s = document.querySelector('.agg-scroll');
       return s.scrollHeight - s.clientHeight;
     });
@@ -803,8 +805,8 @@ try {
     }, sel);
   const rootAttr = (name, pg = page) =>
     pg.evaluate((n) => document.querySelector('.agg-root')?.getAttribute(n) ?? null, name);
-  const noOverflow = () =>
-    page.evaluate(() => {
+  const noOverflow = (pg = page) =>
+    pg.evaluate(() => {
       const bad = [];
       const sc = document.querySelector('.agg-scroll');
       if (sc.scrollWidth > sc.clientWidth + 1)
@@ -857,20 +859,23 @@ try {
     page.locator('.agg-branch', {
       has: page.locator('.agg-branch-name', { hasText: new RegExp(`^${name}$`) }),
     });
-  const rowFullyVisible = (sha) =>
-    page.evaluate((s) => {
+  const rowFullyVisible = (sha, pg = page) =>
+    pg.evaluate((s) => {
       const r = document.querySelector(`.agg-commit[data-sha="${s}"]`)?.getBoundingClientRect();
       const sc = document.querySelector('.agg-scroll').getBoundingClientRect();
       return Boolean(r && r.top >= sc.top - 0.5 && r.bottom <= sc.bottom + 0.5);
     }, sha);
-  const waitRowVisible = async (sha, what = '') => {
+  const waitRowVisible = async (sha, what = '', pg = page) => {
     await waitUntil(
-      () => rowFullyVisible(sha),
+      () => rowFullyVisible(sha, pg),
       12_000,
       `row ${what || sha.slice(0, 7)} scrolled into view`,
     );
-    await settleScroll();
-    assert.ok(await rowFullyVisible(sha), `row ${what || sha.slice(0, 7)} must be fully visible`);
+    await settleScroll(pg);
+    assert.ok(
+      await rowFullyVisible(sha, pg),
+      `row ${what || sha.slice(0, 7)} must be fully visible`,
+    );
   };
 
   /** 詳情面板的內容（英文介面）。 */
@@ -916,7 +921,8 @@ try {
         hasCta: Boolean(d.querySelector('.agg-cta')),
       };
     });
-  const clickRow = (sha, how = {}) => rowLoc(sha).click({ position: { x: 150, y: 10 }, ...how });
+  const clickRow = (sha, how = {}, pg = page) =>
+    rowLoc(sha, pg).click({ position: { x: 150, y: 10 }, ...how });
 
   const readClipboard = async () => {
     await page.bringToFront();
@@ -5408,7 +5414,7 @@ try {
       assert.deepEqual(missing(second), ['L31'], 'sanity: the second batch stops at L31');
       const shaToId = new Map(LONG.specs.map(([id]) => [mockSha(id), id]));
       const moreCalls = () =>
-        seen.paths.filter((p) => /^\/repos\/demo\/long-history\/commits\?sha=[0-9a-f]{40}/.test(p));
+        seen.paths.filter((p) => p.startsWith('/repos/demo/long-history/') && isMoreRequest(p));
       const idsOnScreen = async (pg) => (await rowShas(pg)).map((s) => shaToId.get(s));
       const newestFirst = async (pg) => {
         const t = (await domRows(pg)).map((r) => Date.parse(r.datetime));

@@ -137,7 +137,7 @@ export const seen = { auth: [], paths: [], pending: 0 };
 export const latency = { ms: 0 };
 /**
  * 故障注入：接下來 `more` 個「從 commit sha 往回抓」（`/commits?sha=<40 位 hex>`）的請求回 502（驗證「載入失敗 → 再試一次」）。
- * 只影響 infinite scroll 的請求；branch 名稱的請求（第一批）不受影響。
+ * 只影響 infinite scroll 的請求；第一批（branch 名稱或 branch tip 的 sha，見 isMoreRequest）不受影響。
  */
 export const faults = { more: 0 };
 /**
@@ -150,12 +150,25 @@ export function releaseHeld() {
   gate.hold = false;
   for (const run of gate.queue.splice(0)) run();
 }
-const MORE_RE = /\/commits\?(?:.*&)?sha=[0-9a-f]{40}(?:&|$)/;
+/** 每個 repo 的 branch tip（第一批從這些 sha 開始抓；fetchGitHubGraph 以 tip 的 sha 固定 branch）。 */
+const HEAD_SHAS = new Set(
+  [...REPOS.values()].flatMap((r) => Object.values(r.heads).map((id) => sha(id))),
+);
+/**
+ * 「從 commit sha 往回抓」（infinite scroll）的請求：`/commits?sha=<40 位 hex>`，而且不是 branch tip
+ * （第一批也用 sha，但起點一定是 tip）。e2e 也用它分辨第一批與往回載入。
+ */
+export function isMoreRequest(path) {
+  const url = new URL(path, 'http://x');
+  if (!/\/commits$/.test(url.pathname)) return false;
+  const ref = url.searchParams.get('sha') ?? '';
+  return /^[0-9a-f]{40}$/.test(ref) && !HEAD_SHAS.has(ref);
+}
 
 export function startMock() {
   return new Promise((ok) => {
     const server = createServer((req, res) => {
-      if (gate.hold && MORE_RE.test(req.url)) {
+      if (gate.hold && isMoreRequest(req.url)) {
         gate.queue.push(() => arrive(req, res));
         return;
       }
@@ -323,7 +336,7 @@ export function startMock() {
         case '/commits': {
           const ref = url.searchParams.get('sha') ?? '';
           const isSha = /^[0-9a-f]{40}$/.test(ref);
-          if (isSha && faults.more > 0) {
+          if (isMoreRequest(req.url) && faults.more > 0) {
             faults.more--;
             return json(502, { message: 'Bad Gateway (injected)' });
           }

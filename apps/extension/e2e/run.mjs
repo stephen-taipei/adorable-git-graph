@@ -30,6 +30,7 @@ import {
   SPECS,
   faults,
   gate,
+  isMoreRequest as isMockMoreRequest,
   latency,
   releaseHeld,
   seen,
@@ -1981,7 +1982,7 @@ try {
   /** 全部載入之後畫面上由上到下的 sha（時間都不同，直接依時間倒序）。 */
   const LONG_ROWS = [...longSpecs].sort((a, b) => b.hours - a.hours).map((s) => s.sha);
   const isMoreRequest = (p) =>
-    p.startsWith(`/repos/${LONG.owner}/${LONG.name}/commits?`) && /[?&]sha=[0-9a-f]{40}\b/.test(p);
+    p.startsWith(`/repos/${LONG.owner}/${LONG.name}/commits?`) && isMockMoreRequest(p);
   /** 從 seen.paths 的第 `from` 筆之後，「從 commit sha 往回抓」的請求。 */
   const moreRequests = (from) =>
     seen.paths
