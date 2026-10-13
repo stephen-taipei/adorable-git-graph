@@ -106,6 +106,15 @@ cd apps/cli && npm publish               # 發布（prepack 會重新建置）�
 
 > 安裝後，**已開啟的 GitHub 分頁需重新整理一次**，content script 才會注入。
 
+#### Chrome Web Store 上架
+
+```bash
+pnpm --filter @adorable/extension release        # 乾淨 working tree → 正式建置 → 產物檢查 → release/adorable-git-graph-chrome-<version>.zip
+pnpm --filter @adorable/extension store-assets   # 在自己的電腦上（要連得到 github.com）：store-assets/ 的 1280×800 截圖 ×4 與宣傳圖
+```
+
+商店表單（說明、權限理由、資料揭露）與 AMO 的審查說明見 [docs/store-listing.md](docs/store-listing.md)。
+
 ### Firefox extension（`apps/extension-firefox`）
 
 需求：Firefox **≥ 140**（ESR 140 以上；原因見下方「AMO 上架」）。
@@ -149,12 +158,11 @@ pnpm --filter @adorable/extension-firefox package:source  # → web-ext-artifact
 - **原始碼要一起上傳**：bundle 是壓縮過的（React、three.js），AMO 審查要求提供原始碼與建置步驟。`package:source` 產生的壓縮檔含 `pnpm-lock.yaml`；
   建置方式：Node ≥ 22.18、pnpm 10.28，`pnpm install --frozen-lockfile && pnpm --filter @adorable/extension-firefox build`。
   審查說明可寫：`web-ext lint` 的 4 個 `UNSAFE_VAR_ASSIGNMENT` 警告來自 react-dom 內部（`dangerouslySetInnerHTML` 的處理），本專案原始碼沒有 `innerHTML`。
-- **`gecko.id` 是永久身分**：目前是一個隨機 GUID（`{a7e41ba9-…}`）。第一次上架前可改成自己的；上架後再換 = 另一個附加元件，使用者與更新都不會延續。
+- **`gecko.id` 是永久身分**：`adorable-git-graph@stephen.taipei`（2026-10-13 首次上架前決定）。上架後再換 = 另一個附加元件，使用者與更新都不會延續，**不要再改**。
 - **`strict_min_version` 為什麼是 140**：`data_collection_permissions` 是 Firefox 140（Android 142）才有的欄位，宣告它就不能把最低版本設得更低（`web-ext lint` 會警告）。
-- ⚠️ **請自行確認 `data_collection_permissions: { required: ["none"] }` 是否符合 AMO 的政策**（信心：中低）。本 extension 不會把任何資料送給開發者，
-  但會把 repo 的 owner / 名稱，以及使用者**自行輸入**的 GitHub token 送到 `api.github.com`；Mozilla 是否把這算作「資料收集」我無法確認（政策頁面在此環境讀不到）。
-  若審查不接受，可能的修法是把 token 宣告成**選用**的資料類別（`optional: ["authenticationInfo"]`，使用者不輸入 token 就沒有任何資料送出）；
-  不要直接改成 `required`，那會在安裝時對一個選用功能要求同意。實際該宣告什麼請以 AMO 當時的政策為準。
+- **資料收集宣告**：`required: ["browsingActivity"]`（目前瀏覽的 repo 來自網址，會送到 `api.github.com`）、
+  `optional: ["authenticationInfo"]`（使用者自填的 token）。設定頁儲存 token 時才請求同意（`libs/extension-core/src/shared/consent.ts`）；
+  沒有同意或之後在附加元件管理員撤銷，就不儲存 / 不送 token，照未登入的方式抓。Chrome 沒有這個機制，不受影響。
 - Firefox for Android 沒有測試過，`gecko_android` 只是為了讓 manifest 通過檢查。
 
 ### 介面（三個版本共用同一套 `GitGraphViewer`）

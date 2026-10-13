@@ -3,10 +3,10 @@
 //   firefox : background.scripts（event page；Firefox 的 MV3 不支援 service_worker）+ browser_specific_settings.gecko
 
 /**
- * Firefox 的 add-on ID。上架 AMO 之後就是這個 extension 的永久身分（更換 = 另一個 add-on，使用者資料與更新都不會延續），
- * 因此首次上架前可以改成自己的；用 GUID 而不是 email 形式，避免宣稱擁有某個網域。
+ * Firefox 的 add-on ID。上架 AMO 之後就是這個 extension 的永久身分（更換 = 另一個 add-on，使用者資料與更新都不會延續）。
+ * 用發行者擁有的網域 stephen.taipei（2026-10-13 首次上架前決定），**不要再改**。
  */
-export const GECKO_ID = '{a7e41ba9-0aed-427f-8ecb-26518af4920a}';
+export const GECKO_ID = 'adorable-git-graph@stephen.taipei';
 
 export const GITHUB_API_ORIGIN = 'https://api.github.com';
 
@@ -86,7 +86,12 @@ export function createManifest({
       gecko: {
         id: GECKO_ID,
         strict_min_version: '140.0',
-        data_collection_permissions: { required: ['none'] },
+        // 目前瀏覽的 repo（來自網址）會送到 api.github.com → browsingActivity（必要）；
+        // 使用者自填的 token → authenticationInfo（選用：設定頁儲存 token 時才請求，見 src/shared/consent.ts）
+        data_collection_permissions: {
+          required: ['browsingActivity'],
+          optional: ['authenticationInfo'],
+        },
       },
       gecko_android: { strict_min_version: '142.0' },
     };

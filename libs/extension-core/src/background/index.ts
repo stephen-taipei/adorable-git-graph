@@ -9,7 +9,7 @@ import {
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphData } from '@adorable/graph-core';
 import { parseFetchMore } from '../shared/history';
-import { FETCH_MORE_MAX_STARTS } from '../shared/messages';
+import { FETCH_MORE_MAX_STARTS, RPC_PORT } from '../shared/messages';
 import type {
   BgError,
   BgRequest,
@@ -20,6 +20,7 @@ import type {
   TabCommand,
 } from '../shared/messages';
 import { SETTINGS_KEY, loadSettings, type Settings } from '../shared/settings';
+import { hasTokenConsent } from '../shared/consent';
 
 /**
  * GitHub への要求にかける時間の上限。Firefox の background は event page で、アイドルが 30 秒続くと停止する。
@@ -119,11 +120,16 @@ function rotateGeneration() {
     )
     .catch(() => {});
 }
+/** 實際拿來呼叫 API 的設定：Firefox 上沒有「驗證資訊」的資料收集同意時不送 token。 */
+async function loadUsableSettings(): Promise<Settings> {
+  const settings = await loadSettings();
+  return settings.token && !(await hasTokenConsent()) ? { ...settings, token: '' } : settings;
+}
 function readScopedSettings() {
   // Serialize only settings reads/adoption. An older read cannot overwrite a newer snapshot.
   const pending = settingsReads.then(async () => {
     const before = settingsGeneration;
-    const settings = await loadSettings();
+    const settings = await loadUsableSettings();
     assertGeneration(before);
     if (settingsSnapshot && JSON.stringify(settingsSnapshot) !== JSON.stringify(settings))
       rotateGeneration();
@@ -327,7 +333,7 @@ async function fetchMore(
 }
 
 async function rateLimit(): Promise<RateLimitResponse> {
-  const settings = await loadSettings();
+  const settings = await loadUsableSettings();
   try {
     const res = await fetch(`${__AGG_API_BASE__}/rate_limit`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -353,157 +359,182 @@ async function rateLimit(): Promise<RateLimitResponse> {
   }
 }
 
-chrome.runtime.onMessage.addListener(
-  (raw: unknown, sender, sendResponse: (r: BgResponse) => void) => {
-    // 只接受自己這個 extension 的 context（content script / options page）
-    if (sender.id !== chrome.runtime.id) return false;
-    const req = raw as BgRequest | undefined;
-    switch (req?.type) {
-      case 'diagnostic-cancel': {
-        if (typeof req.requestId === 'string')
-          diagnosticRequests.get(`${sender.tab?.id ?? 'options'}:${req.requestId}`)?.abort();
-        sendResponse({ ok: true, data: null });
-        return false;
-      }
-      case 'diagnostic': {
-        if (
-          typeof req.owner !== 'string' ||
-          typeof req.repo !== 'string' ||
-          !isValidRepoSegment(req.owner) ||
-          !isValidRepoSegment(req.repo) ||
-          typeof req.requestId !== 'string' ||
-          !/^[a-z0-9-]{1,64}$/i.test(req.requestId) ||
-          !isDiagnosticRequest(req.query) ||
-          diagnosticRequests.size >= 24
-        ) {
-          sendResponse({
-            ok: false,
-            error: { code: 'invalid_repo', message: 'Invalid diagnostic request' },
-          });
-          return false;
-        }
-        if (typeof req.generation !== 'string' || req.generation !== diagnosticGeneration) {
-          sendResponse({ ok: false, error: toError(new SourceChangedError()) });
-          // Legacy content must reload its page; do not create a refresh loop for missing tags.
-          if (typeof req.generation === 'string' && sender.tab?.id != null)
-            void notifyInvalidated(sender.tab.id).catch(() => {});
-          return false;
-        }
-        const key = `${sender.tab?.id ?? 'options'}:${req.requestId}`;
-        diagnosticRequests.get(key)?.abort();
-        const controller = new AbortController(),
-          generation = settingsGeneration;
-        diagnosticRequests.set(key, controller);
-        void (async () => {
-          try {
-            const signal = AbortSignal.any([
-              controller.signal,
-              AbortSignal.timeout(FETCH_TIMEOUT_MS),
-            ]);
-            await withinRequest(cacheInvalidation, signal);
-            const scoped = await withinRequest(readScopedSettings(), signal);
-            assertGeneration(generation, req.generation);
-            await withinRequest(cacheInvalidation, signal);
-            assertGeneration(scoped.generation, req.generation);
-            signal.throwIfAborted();
-            const adapter = diagnosticsFor(req.owner, req.repo, scoped.settings.token);
-            const query = req.query;
-            const work =
-              query.operation === 'compare'
-                ? adapter.compare(query.base, query.head, signal)
-                : query.operation === 'changes'
-                  ? adapter.changes(query.sha, query.parent, signal, query.commitRepo)
-                  : query.operation === 'patch'
-                    ? adapter.patch(
-                        query.base,
-                        query.head,
-                        query.path,
-                        query.previousPath,
-                        signal,
-                        query.headRepo,
-                      )
-                    : adapter.pullRequest!(query.number, signal);
-            const data = await withinRequest<Awaited<typeof work>>(work, signal);
-            await validateSettingsScope(scoped, signal);
-            assertGeneration(generation, req.generation);
-            signal.throwIfAborted();
-            sendResponse({ ok: true, data });
-          } catch (e) {
-            sendResponse({
-              ok: false,
-              error: toError(
-                generation !== settingsGeneration || req.generation !== diagnosticGeneration
-                  ? new SourceChangedError()
-                  : e,
-              ),
-            });
-          } finally {
-            controller.abort();
-            if (diagnosticRequests.get(key) === controller) diagnosticRequests.delete(key);
-          }
-        })();
-        return true;
-      }
-      case 'fetch-graph': {
-        if (
-          typeof req.owner !== 'string' ||
-          typeof req.repo !== 'string' ||
-          !isValidRepoSegment(req.owner) ||
-          !isValidRepoSegment(req.repo)
-        ) {
-          sendResponse({
-            ok: false,
-            error: { code: 'invalid_repo', message: 'Invalid repository' },
-          });
-          return false;
-        }
-        void fetchGraph(req).then(sendResponse);
-        return true;
-      }
-      case 'fetch-more': {
-        // content script 送來的內容一律重新驗證（repo 名稱、40 位 hex 的 sha、起點數量），不合法就不碰網路
-        const more = parseFetchMore(req);
-        if (!more) {
-          sendResponse({ ok: false, error: { code: 'invalid', message: 'Invalid request' } });
-          return false;
-        }
-        const key = JSON.stringify([
-          more.generation,
-          more.owner,
-          more.repo,
-          ...more.shas,
-        ]).toLowerCase();
-        let p = inflightMore.get(key);
-        if (!p) {
-          const pending = fetchMore(more).finally(() => {
-            if (inflightMore.get(key) === pending) inflightMore.delete(key);
-          });
-          inflightMore.set(key, pending);
-          p = pending;
-        }
-        void p.then(sendResponse);
-        return true;
-      }
-      case 'rate-limit':
-        void rateLimit().then(sendResponse);
-        return true;
-      case 'clear-cache':
-        diagnosticAdapters.clear();
-        void invalidateCache().then(
-          () => sendResponse({ ok: true, data: null }),
-          () =>
-            sendResponse({ ok: false, error: { code: 'unknown', message: 'Cache unavailable' } }),
-        );
-        return true;
-      case 'open-options':
-        void chrome.runtime.openOptionsPage();
-        sendResponse({ ok: true, data: null });
-        return false;
-      default:
-        return false;
+function handleRequest(
+  raw: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (r: BgResponse) => void,
+): boolean {
+  // 只接受自己這個 extension 的 context（content script / options page）
+  if (sender.id !== chrome.runtime.id) return false;
+  const req = raw as BgRequest | undefined;
+  switch (req?.type) {
+    case 'diagnostic-cancel': {
+      if (typeof req.requestId === 'string')
+        diagnosticRequests.get(`${sender.tab?.id ?? 'options'}:${req.requestId}`)?.abort();
+      sendResponse({ ok: true, data: null });
+      return false;
     }
-  },
-);
+    case 'diagnostic': {
+      if (
+        typeof req.owner !== 'string' ||
+        typeof req.repo !== 'string' ||
+        !isValidRepoSegment(req.owner) ||
+        !isValidRepoSegment(req.repo) ||
+        typeof req.requestId !== 'string' ||
+        !/^[a-z0-9-]{1,64}$/i.test(req.requestId) ||
+        !isDiagnosticRequest(req.query) ||
+        diagnosticRequests.size >= 24
+      ) {
+        sendResponse({
+          ok: false,
+          error: { code: 'invalid_repo', message: 'Invalid diagnostic request' },
+        });
+        return false;
+      }
+      if (typeof req.generation !== 'string' || req.generation !== diagnosticGeneration) {
+        sendResponse({ ok: false, error: toError(new SourceChangedError()) });
+        // Legacy content must reload its page; do not create a refresh loop for missing tags.
+        if (typeof req.generation === 'string' && sender.tab?.id != null)
+          void notifyInvalidated(sender.tab.id).catch(() => {});
+        return false;
+      }
+      const key = `${sender.tab?.id ?? 'options'}:${req.requestId}`;
+      diagnosticRequests.get(key)?.abort();
+      const controller = new AbortController(),
+        generation = settingsGeneration;
+      diagnosticRequests.set(key, controller);
+      void (async () => {
+        try {
+          const signal = AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          ]);
+          await withinRequest(cacheInvalidation, signal);
+          const scoped = await withinRequest(readScopedSettings(), signal);
+          assertGeneration(generation, req.generation);
+          await withinRequest(cacheInvalidation, signal);
+          assertGeneration(scoped.generation, req.generation);
+          signal.throwIfAborted();
+          const adapter = diagnosticsFor(req.owner, req.repo, scoped.settings.token);
+          const query = req.query;
+          const work =
+            query.operation === 'compare'
+              ? adapter.compare(query.base, query.head, signal)
+              : query.operation === 'changes'
+                ? adapter.changes(query.sha, query.parent, signal, query.commitRepo)
+                : query.operation === 'patch'
+                  ? adapter.patch(
+                      query.base,
+                      query.head,
+                      query.path,
+                      query.previousPath,
+                      signal,
+                      query.headRepo,
+                    )
+                  : adapter.pullRequest!(query.number, signal);
+          const data = await withinRequest<Awaited<typeof work>>(work, signal);
+          await validateSettingsScope(scoped, signal);
+          assertGeneration(generation, req.generation);
+          signal.throwIfAborted();
+          sendResponse({ ok: true, data });
+        } catch (e) {
+          sendResponse({
+            ok: false,
+            error: toError(
+              generation !== settingsGeneration || req.generation !== diagnosticGeneration
+                ? new SourceChangedError()
+                : e,
+            ),
+          });
+        } finally {
+          controller.abort();
+          if (diagnosticRequests.get(key) === controller) diagnosticRequests.delete(key);
+        }
+      })();
+      return true;
+    }
+    case 'fetch-graph': {
+      if (
+        typeof req.owner !== 'string' ||
+        typeof req.repo !== 'string' ||
+        !isValidRepoSegment(req.owner) ||
+        !isValidRepoSegment(req.repo)
+      ) {
+        sendResponse({
+          ok: false,
+          error: { code: 'invalid_repo', message: 'Invalid repository' },
+        });
+        return false;
+      }
+      void fetchGraph(req).then(sendResponse);
+      return true;
+    }
+    case 'fetch-more': {
+      // content script 送來的內容一律重新驗證（repo 名稱、40 位 hex 的 sha、起點數量），不合法就不碰網路
+      const more = parseFetchMore(req);
+      if (!more) {
+        sendResponse({ ok: false, error: { code: 'invalid', message: 'Invalid request' } });
+        return false;
+      }
+      const key = JSON.stringify([
+        more.generation,
+        more.owner,
+        more.repo,
+        ...more.shas,
+      ]).toLowerCase();
+      let p = inflightMore.get(key);
+      if (!p) {
+        const pending = fetchMore(more).finally(() => {
+          if (inflightMore.get(key) === pending) inflightMore.delete(key);
+        });
+        inflightMore.set(key, pending);
+        p = pending;
+      }
+      void p.then(sendResponse);
+      return true;
+    }
+    case 'rate-limit':
+      void rateLimit().then(sendResponse);
+      return true;
+    case 'clear-cache':
+      diagnosticAdapters.clear();
+      void invalidateCache().then(
+        () => sendResponse({ ok: true, data: null }),
+        () => sendResponse({ ok: false, error: { code: 'unknown', message: 'Cache unavailable' } }),
+      );
+      return true;
+    case 'open-options':
+      void chrome.runtime.openOptionsPage();
+      sendResponse({ ok: true, data: null });
+      return false;
+    default:
+      return false;
+  }
+}
+
+chrome.runtime.onMessage.addListener(handleRequest);
+
+// sendToBackground 的 port：一條連線一個請求。對方先斷開（換頁）就不回應；同步處理完卻沒有回應的請求回 null。
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== RPC_PORT || port.sender?.id !== chrome.runtime.id) return;
+  let open = true;
+  port.onDisconnect.addListener(() => {
+    open = false;
+  });
+  port.onMessage.addListener((raw: unknown) => {
+    let answered = false;
+    const reply = (res: BgResponse | null) => {
+      if (answered || !open) return;
+      answered = true;
+      try {
+        port.postMessage(res);
+      } catch {
+        // 對方剛好斷開
+      }
+    };
+    if (!handleRequest(raw, port.sender!, reply)) reply(null);
+  });
+});
 
 // token 或抓取範圍變更 → 舊 cache 可能含私有資料 / 不符新設定，直接清掉。
 chrome.storage.onChanged.addListener((changes, area) => {

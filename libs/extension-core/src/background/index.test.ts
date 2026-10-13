@@ -25,6 +25,7 @@ async function harness(
 ) {
   let message: ((req: unknown, sender: unknown, reply: (data: any) => void) => boolean) | undefined;
   let changed: ((changes: unknown, area: string) => void) | undefined;
+  let connect: ((port: unknown) => void) | undefined;
   const sent: unknown[] = [];
   const call = (req: unknown) =>
     new Promise<any>((resolve) => {
@@ -40,8 +41,32 @@ async function harness(
           message = fn;
         },
       },
+      onConnect: {
+        addListener: (fn: typeof connect) => {
+          connect = fn;
+        },
+      },
       openOptionsPage: vi.fn(),
       sendMessage: call,
+      // content 端的 sendToBackground：接到 background 的 onConnect
+      connect: ({ name }: { name: string }) => {
+        const toPage: ((m: unknown) => void)[] = [];
+        const toBackground: ((m: unknown) => void)[] = [];
+        const backgroundGone: (() => void)[] = [];
+        connect!({
+          name,
+          sender: { id: 'fixture-extension', tab: { id: 7 } },
+          onMessage: { addListener: (fn: (m: unknown) => void) => toBackground.push(fn) },
+          onDisconnect: { addListener: (fn: () => void) => backgroundGone.push(fn) },
+          postMessage: (m: unknown) => toPage.forEach((fn) => fn(m)),
+        });
+        return {
+          onMessage: { addListener: (fn: (m: unknown) => void) => toPage.push(fn) },
+          onDisconnect: { addListener: () => {} },
+          postMessage: (m: unknown) => toBackground.forEach((fn) => fn(m)),
+          disconnect: () => backgroundGone.forEach((fn) => fn()),
+        };
+      },
     },
     storage: {
       local: {
@@ -71,10 +96,26 @@ async function harness(
     },
   });
   await import('./index.ts');
+  /** sendToBackground 的 port：送出 req，回傳 background postMessage 的內容。 */
+  const connectPort = (name: string, req: unknown, id = 'fixture-extension') => {
+    const posted: unknown[] = [];
+    let onMessage: ((raw: unknown) => void) | undefined;
+    const disconnects: (() => void)[] = [];
+    connect!({
+      name,
+      sender: { id, tab: { id: 7 } },
+      onMessage: { addListener: (fn: typeof onMessage) => (onMessage = fn) },
+      onDisconnect: { addListener: (fn: () => void) => disconnects.push(fn) },
+      postMessage: (res: unknown) => posted.push(res),
+    });
+    onMessage?.(req);
+    return { posted, disconnect: () => disconnects.forEach((fn) => fn()) };
+  };
   return {
     sent,
     changed: (settings: unknown) => changed!({ settings }, 'local'),
     call,
+    connectPort,
   };
 }
 const graph = (name: string) => ({
@@ -779,5 +820,40 @@ describe('background credential scope and fork diagnostics', () => {
     expect(changes.mock.calls[0]![3]).toBe('fork/r');
     expect(patch.mock.calls[0]![5]).toBe('fork/r');
     expect(mocks.diagnostics).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('sendToBackground port', () => {
+  it('answers on the port, null for unknown requests, nothing for other names or extensions', async () => {
+    const { connectPort } = await harness({});
+    expect(connectPort('agg-rpc', { type: 'open-options' }).posted).toEqual([
+      { ok: true, data: null },
+    ]);
+    expect(connectPort('agg-rpc', { type: 'nope' }).posted).toEqual([null]);
+    expect(connectPort('other', { type: 'open-options' }).posted).toEqual([]);
+    expect(connectPort('agg-rpc', { type: 'open-options' }, 'someone-else').posted).toEqual([]);
+  });
+
+  it('does not answer a port the page already disconnected', async () => {
+    const answered = deferred();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        answered.resolve();
+        return new Response(
+          JSON.stringify({ resources: { core: { limit: 60, remaining: 60, reset: 1 } } }),
+        );
+      }),
+    );
+    const { connectPort } = await harness({});
+    const port = connectPort('agg-rpc', { type: 'rate-limit' });
+    port.disconnect();
+    await answered.promise;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(port.posted).toEqual([]);
+    // 對照：沒斷開的 port 會收到回應
+    const live = connectPort('agg-rpc', { type: 'rate-limit' });
+    await vi.waitFor(() => expect(live.posted).toHaveLength(1));
+    expect(live.posted[0]).toMatchObject({ ok: true, data: { limit: 60 } });
   });
 });

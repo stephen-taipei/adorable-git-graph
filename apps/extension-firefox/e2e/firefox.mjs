@@ -185,6 +185,34 @@ export function backgroundControl(browser, geckoId, op) {
   );
 }
 
+/**
+ * 授予 / 撤銷選用的資料收集同意（manifest 的 data_collection_permissions.optional），等同使用者在同意對話框按下允許。
+ * 設定頁不接受真實輸入（見檔頭），程式觸發的 click 不算使用者操作，permissions.request 不會跳對話框。
+ * 用到 Firefox 內部 API（ExtensionPermissions）：升級 Firefox 時要重新驗證。
+ */
+export function dataCollectionConsent(browser, geckoId, op, types) {
+  return chromeEval(
+    browser,
+    async (id, what, data) => {
+      const { ExtensionParent } = ChromeUtils.importESModule(
+        'resource://gre/modules/ExtensionParent.sys.mjs',
+      );
+      const { ExtensionPermissions } = ChromeUtils.importESModule(
+        'resource://gre/modules/ExtensionPermissions.sys.mjs',
+      );
+      const ext = ExtensionParent.GlobalManager.getExtension(id);
+      if (!ext) throw new Error(`extension ${id} not found`);
+      const perms = { permissions: [], origins: [], data_collection: data };
+      if (what === 'grant') await ExtensionPermissions.add(id, perms, ext);
+      else await ExtensionPermissions.remove(id, perms, ext);
+      return (await ExtensionPermissions.get(id)).data_collection ?? null;
+    },
+    geckoId,
+    op,
+    types,
+  );
+}
+
 /** extension 自己的頁面 / event page 丟出的 console 錯誤（content script 的在 page 的 console 事件裡，這裡抓不到的那一半）。 */
 export function extensionConsoleErrors(browser, uuid) {
   return chromeEval(

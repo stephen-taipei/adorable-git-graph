@@ -22,6 +22,8 @@ no advertising, and no server operated by the developer. Everything it stores st
 | GitHub API responses (commit messages, author names, branch / tag names, avatar URLs)    | To draw the graph and avoid repeated requests                                 | —                                                                   | Extension local storage, cached for about 10 minutes                                                    |
 | Display preferences (for example animation on / off, detail panel size)                  | To remember your choices                                                      | —                                                                   | Extension local storage                                                                                 |
 
+- On Firefox, the add-on asks for your consent ("authentication information") when you save a token; without it the token
+  is neither saved nor sent.
 - The token is only read by the extension's background script. It is never exposed to the github.com page, never
   put in a URL, and never sent anywhere other than `api.github.com`.
 - Author avatars are loaded directly from GitHub's image servers (the avatar URLs returned by the GitHub API).
@@ -75,6 +77,7 @@ Adorable Git Graph **不會**收集、販售或分享任何個人資料；沒有
 | GitHub API 回應（commit 訊息、作者名稱、branch / tag 名稱、頭像網址） | 繪製圖表、避免重複請求                          | —                                                         | 擴充功能的本機儲存空間，快取約 10 分鐘                              |
 | 顯示偏好（例如動畫開關、詳情面板大小）                                | 記住你的設定                                    | —                                                         | 擴充功能的本機儲存空間                                              |
 
+- Firefox 版在你儲存 token 時會先徵求「驗證資訊」的資料收集同意；沒有同意就不會儲存也不會送出 token。
 - token 只有擴充功能的 background 讀得到，不會暴露給 github.com 頁面、不會出現在網址裡，也不會送往 `api.github.com` 以外的地方。
 - 作者頭像直接從 GitHub 的圖片伺服器載入（GitHub API 回傳的頭像網址）。
 - 擴充功能只在 `https://github.com/*` 執行，只會請求 `https://api.github.com/*`。
