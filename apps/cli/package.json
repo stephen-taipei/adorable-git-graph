@@ -1,0 +1,57 @@
+{
+  "name": "adorable-git-graph",
+  "version": "0.1.0",
+  "description": "Cartoon-style animated git graph for your local repositories. Run `npx adorable-git-graph` inside any git repo.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "adorable-git-graph": "bin/adorable-git-graph.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "git",
+    "git-graph",
+    "git-log",
+    "visualization",
+    "three.js",
+    "cli"
+  ],
+  "homepage": "https://github.com/stephen-taipei/adorable-git-grpah#readme",
+  "bugs": {
+    "url": "https://github.com/stephen-taipei/adorable-git-grpah/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stephen-taipei/adorable-git-grpah.git",
+    "directory": "apps/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "e2e": "node e2e/run.mjs",
+    "prepack": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "playwright-core": "^1.63.0",
+    "vite": "^8.3.2"
+  },
+  "nx": {
+    "targets": {
+      "build": {
+        "cache": false
+      }
+    }
+  }
+}

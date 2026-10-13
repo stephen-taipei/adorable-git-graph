@@ -28,6 +28,7 @@ import {
   saveCredential,
   syncAuth,
 } from './authScope';
+import { HAS_SERVER } from './runtime';
 
 const isDetailSize = (v: string): v is DetailSize => v === 'normal' || v === 'wide';
 
@@ -72,7 +73,7 @@ export function App() {
   // 最近一次看的本機 repo（從 GitHub 切回本機時回到它）
   const lastLocal = useRef<Source>({ kind: 'local' });
   // 靜態建置只有預設 repo：網址裡的 ?local= 不用帶回去
-  if (source.kind === 'local') lastLocal.current = import.meta.env.DEV ? source : { kind: 'local' };
+  if (source.kind === 'local') lastLocal.current = HAS_SERVER ? source : { kind: 'local' };
   // `agg.theme` is the colour-scheme setting: 'auto' or a scheme id (legacy 'day' / 'night' still read).
   const [theme, setTheme] = useStored('agg.theme', AUTO_SCHEME, isSchemeSetting);
   const [themeId, setThemeId] = useStored('agg.theme-id', DEFAULT_THEME, isThemeId);
