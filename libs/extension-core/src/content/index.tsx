@@ -1,6 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { viewerCss } from '@adorable/graph-ui';
 import { App } from './App';
+import { ANIMATION_OFF_KEY } from './useAnimationOff';
+import { DETAIL_SIZE_KEY } from './useDetailSize';
+import { preloadExtensionSettings } from './useExtensionSetting';
 import overlayCss from './styles.css?inline';
 // The extension ships only the default theme, inlined with the structure styles.
 import themeCss from '@adorable/graph-ui/themes/candy.css?inline';
@@ -37,7 +40,13 @@ function mount() {
   }
 
   document.documentElement.append(host);
-  createRoot(app).render(<App />);
+  // overlay 的偏好設定先讀好再 render：第一次打開就是存過的值（「關閉動畫」不會先播一段動畫）。
+  // storage 沒回應也不能讓浮動按鈕一直不出現，最多等 1 秒。
+  const ready = Promise.race([
+    preloadExtensionSettings([ANIMATION_OFF_KEY, DETAIL_SIZE_KEY]),
+    new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+  ]);
+  void ready.then(() => createRoot(app).render(<App />));
 }
 
 mount();

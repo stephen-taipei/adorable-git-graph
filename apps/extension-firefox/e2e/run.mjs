@@ -93,6 +93,8 @@ const waitUntil = async (cond, timeout = 20_000, what = 'condition') => {
   }
 };
 /** 反覆讀取 `read()` 直到等於 expected（deepStrictEqual）；逾時就丟出「預期 / 實際」。 */
+// 全選的修飾鍵：macOS 是 Cmd+A（Ctrl+A 在 macOS 的輸入框只會把游標移到行首，字會打在舊內容前面）
+const SELECT_ALL = process.platform === 'darwin' ? 'Meta' : 'Control';
 const eventually = async (read, expected, label, timeout = 12_000) => {
   const t = Date.now();
   for (;;) {
@@ -444,7 +446,7 @@ try {
   /** 真的用鍵盤把搜尋框的內容換成 q（全選再打字；q 為空就刪除）。 */
   const fillSearch = async (q) => {
     await focusSearch();
-    await chord(page, ['Control'], 'a');
+    await chord(page, [SELECT_ALL], 'a');
     if (q) await page.keyboard.type(q);
     else await page.keyboard.press('Backspace');
   };
@@ -1815,12 +1817,20 @@ try {
       let st = await pageState();
       assert.equal(st.overflow, 'hidden', '<html> overflow is locked while the overlay is open');
       assert.equal(st.computed, 'hidden');
-      assert.equal(st.gutter, 'stable', 'scrollbar-gutter keeps the background from shifting');
+      // 只有原本佔寬度的捲軸才需要保留 gutter（見 Overlay.tsx）。macOS 預設是浮動捲軸（不佔寬度），
+      // 這時加 gutter 反而會讓版面位移，所以不加；位移檢查照樣要過。
+      if (process.platform !== 'darwin')
+        assert.ok(
+          closedLayout.scrollbar > 0,
+          'the tall fake page shows a classic scrollbar (needed to detect a background shift)',
+        );
+      if (closedLayout.scrollbar > 0)
+        assert.equal(st.gutter, 'stable', 'scrollbar-gutter keeps the background from shifting');
+      else {
+        assert.equal(st.gutter, '', 'overlay scrollbars take no width: no gutter is added');
+        console.log('  overlay scrollbars (no width): the gutter is not needed');
+      }
       assert.equal(st.y, 0);
-      assert.ok(
-        closedLayout.scrollbar > 0,
-        'the tall fake page shows a classic scrollbar (needed to detect a background shift)',
-      );
       const openLayout = await layout();
       assert.ok(
         Math.abs(openLayout.mainLeft - closedLayout.mainLeft) < 0.5,
@@ -2035,7 +2045,7 @@ try {
       await page.keyboard.type('gts rate/limit jk', { delay: 10 });
       await page.keyboard.press('Enter');
       await chord(page, ['Shift'], 'Enter');
-      await chord(page, ['Control'], 'a');
+      await chord(page, [SELECT_ALL], 'a');
       await page.keyboard.press('Backspace');
       await page.keyboard.type('feat');
       await page.keyboard.press('Escape'); // 清掉搜尋
@@ -2121,12 +2131,27 @@ try {
     const night = await cardBg();
     await assertGraphSync('night');
     await shot('4-night.png');
+    // overlay 開著時在 GitHub 換配色：不用關掉重開就跟著換（同一個 scroller，不重建）
+    await ui((r) => (r.querySelector('.agg-scroll').dataset.aggE2eSame = '1'));
+    await page.evaluate(() => (document.documentElement.dataset.colorMode = 'light'));
+    await waitFor('.agg-root[data-theme="day"]');
+    const liveDay = await cardBg();
+    assert.notEqual(night, liveDay, 'the list card switches to the day colours while open');
+    await page.evaluate(() => (document.documentElement.dataset.colorMode = 'dark'));
+    await waitFor('.agg-root[data-theme="night"]');
+    assert.equal(
+      await ui((r) => r.querySelector('.agg-scroll').dataset.aggE2eSame ?? null),
+      '1',
+      'switching colours live keeps the same scroller',
+    );
+    await assertGraphSync('night after a live switch');
     await closeOverlay();
     await page.evaluate(() => (document.documentElement.dataset.colorMode = 'light'));
     await click('.agg-fab');
     await waitFor('.agg-root[data-theme="day"]');
     await waitFor('.agg-commit', 30_000);
     assert.notEqual(night, await cardBg(), 'the list card uses different colours at night');
+    assert.equal(await cardBg(), liveDay, 'a live switch gives the same day colours as reopening');
     await closeOverlay();
   });
 
@@ -2599,6 +2624,79 @@ try {
       } finally {
         await withSettings(async () => chrome.storage.local.remove('detailSize'));
         await closeOverlay();
+      }
+    },
+  );
+
+  await step(
+    'animation toggle: remembered in extension storage, not in github.com localStorage (old value migrated)',
+    async () => {
+      const LEGACY = 'agg:animation-off';
+      const ANIM = /^(關閉動畫|Disable animations)$/;
+      const pressed = () =>
+        shadow(
+          (sr, src) =>
+            [...sr.querySelectorAll('button[aria-label]')]
+              .find((b) => new RegExp(src).test(b.getAttribute('aria-label')))
+              ?.getAttribute('aria-pressed') ?? null,
+          ANIM.source,
+        );
+      const stored = () =>
+        withSettings(
+          async () => (await chrome.storage.local.get('animationOff')).animationOff ?? null,
+        );
+      const clearStored = () =>
+        withSettings(async () => chrome.storage.local.remove('animationOff'));
+      const pageStored = () => page.evaluate((k) => localStorage.getItem(k), LEGACY);
+      try {
+        await closeOverlay();
+        await clearStored();
+        await page.evaluate((k) => localStorage.removeItem(k), LEGACY);
+        await openOverlay();
+        assert.equal(await pressed(), 'false', 'animations are on by default');
+        await button(ANIM);
+        await eventually(pressed, 'true', 'the toggle is pressed');
+        await waitFor('.agg-root[data-reduced-motion]');
+        await eventually(stored, true, 'saved in extension storage');
+        assert.equal(await pageStored(), null, 'nothing is written to github.com localStorage');
+        // 重新載入頁面（新的 content script）：仍是關閉
+        await closeOverlay();
+        await gotoRepo();
+        // 第一次 render 就要是「關閉動畫」：.agg-root 一出現就帶 data-reduced-motion（不能先動一下才關）
+        await page.evaluate(() => {
+          const sr = document.getElementById('adorable-git-graph-host').shadowRoot;
+          window.__aggFirstMotion = null;
+          const mo = new MutationObserver(() => {
+            const root = sr.querySelector('.agg-root');
+            if (!root) return;
+            window.__aggFirstMotion = root.hasAttribute('data-reduced-motion');
+            mo.disconnect();
+          });
+          mo.observe(sr, { childList: true, subtree: true });
+        });
+        await openOverlay();
+        assert.equal(
+          await page.evaluate(() => window.__aggFirstMotion),
+          true,
+          'the very first render already has animations off',
+        );
+        await eventually(pressed, 'true', 'still off after a page reload');
+        await button(ANIM);
+        await eventually(pressed, 'false', 'back on');
+        await eventually(stored, false, 'on saved too');
+
+        // 舊版寫在 github.com localStorage 的值：搬進 extension storage，並從頁面移除
+        await closeOverlay();
+        await clearStored();
+        await page.evaluate((k) => localStorage.setItem(k, 'true'), LEGACY);
+        await openOverlay();
+        await eventually(pressed, 'true', 'the old setting is picked up');
+        await eventually(stored, true, 'the old setting is migrated');
+        assert.equal(await pageStored(), null, 'the old key is removed from github.com');
+      } finally {
+        await closeOverlay();
+        await clearStored();
+        await page.evaluate((k) => localStorage.removeItem(k), LEGACY);
       }
     },
   );
