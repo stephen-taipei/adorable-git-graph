@@ -10,29 +10,25 @@ import { clamp, clamp01, damp, easeInOutCubic, easeOutElastic, rng } from './eas
 import { computeMetrics, planWindow, visibleRows } from './geometry';
 import type { CanvasWindow, LogMetrics } from './geometry';
 import { spawnOrder } from './incremental';
-
-export type SceneTheme = 'day' | 'night';
+import type { BallTopper } from '../themes/config';
 
 /** Theme-dependent scene colours and decorations (see themes/config.ts). */
 export interface SceneAppearance {
   readonly outline: string;
   readonly selection: { readonly outer: string; readonly inner: string };
-  readonly dim: Readonly<Record<SceneTheme, { readonly body: string; readonly outline: string }>>;
-  readonly horns: boolean;
+  /** Colours of commits faded out by search / branch focus, for the active colour scheme. */
+  readonly dim: { readonly body: string; readonly outline: string };
+  readonly topper: BallTopper;
 }
 
 export const DEFAULT_SCENE_APPEARANCE: SceneAppearance = {
   outline: OUTLINE_COLOR,
   selection: { outer: OUTLINE_COLOR, inner: '#ffd23f' },
-  dim: {
-    day: { body: '#e6e1f1', outline: '#bcb3d8' },
-    night: { body: '#6a5fa8', outline: '#8479c4' },
-  },
-  horns: false,
+  dim: { body: '#e6e1f1', outline: '#bcb3d8' },
+  topper: 'none',
 };
 
 export interface SceneOptions {
-  theme?: SceneTheme;
   appearance?: SceneAppearance;
   /** 尊重 prefers-reduced-motion：不播放進場動畫與閒置晃動。 */
   reducedMotion?: boolean;
@@ -53,7 +49,7 @@ const FALLBACK_VIEW_H = 640;
 
 interface Extra {
   sprite: THREE.Sprite;
-  kind: 'crown' | 'sparkle' | 'sweat' | 'sprout' | 'horns';
+  kind: 'crown' | 'sparkle' | 'sweat' | 'sprout' | 'horns' | 'hat';
   base: THREE.Vector3;
 }
 
@@ -166,7 +162,7 @@ export class LogGraphScene {
     side: THREE.BackSide,
   });
   private readonly dimHullMat = new THREE.MeshBasicMaterial({
-    color: DEFAULT_SCENE_APPEARANCE.dim.day.outline,
+    color: DEFAULT_SCENE_APPEARANCE.dim.outline,
     side: THREE.BackSide,
   });
   private readonly dimBodyMat: THREE.MeshToonMaterial;
@@ -201,7 +197,6 @@ export class LogGraphScene {
   private raf = 0;
   private paused = false;
   private disposed = false;
-  private theme: SceneTheme;
   private appearance: SceneAppearance;
   private reduced: boolean;
 
@@ -218,7 +213,6 @@ export class LogGraphScene {
 
   constructor(host: HTMLElement, opts: SceneOptions = {}) {
     this.host = host;
-    this.theme = opts.theme ?? 'day';
     this.appearance = opts.appearance ?? DEFAULT_SCENE_APPEARANCE;
     this.reduced = opts.reducedMotion ?? false;
 
@@ -241,7 +235,7 @@ export class LogGraphScene {
     this.scene.add(this.world);
 
     this.dimBodyMat = new THREE.MeshToonMaterial({
-      color: DEFAULT_SCENE_APPEARANCE.dim.day.body,
+      color: DEFAULT_SCENE_APPEARANCE.dim.body,
       gradientMap: this.kit.toonGradient,
     });
 
@@ -271,14 +265,9 @@ export class LogGraphScene {
 
   // ───────────────────────── public API ─────────────────────────
 
-  setTheme(theme: SceneTheme) {
-    this.theme = theme;
-    this.applyTheme();
-  }
-
   /** Switch theme colours; decorations that change the balls rebuild them without a replay. */
   setAppearance(appearance: SceneAppearance) {
-    const rebuild = appearance.horns !== this.appearance.horns;
+    const rebuild = appearance.topper !== this.appearance.topper;
     this.appearance = appearance;
     if (rebuild && this.layout) {
       const keep = new Map(this.actors.map((a) => [a.node.sha, a]));
@@ -493,7 +482,7 @@ export class LogGraphScene {
   }
 
   private applyTheme() {
-    const dim = this.appearance.dim[this.theme];
+    const dim = this.appearance.dim;
     this.hullMat.color.set(this.appearance.outline);
     this.selOuter.color.set(this.appearance.selection.outer);
     this.selInner.color.set(this.appearance.selection.inner);
@@ -696,8 +685,11 @@ export class LogGraphScene {
     };
 
     // Little devil horns sit on the upper rim of the ball, under any crown.
-    if (this.appearance.horns)
+    if (this.appearance.topper === 'horns')
       addExtra('horns', this.kit.horns, radius * 1.7, radius * 0.62, 0, radius * 0.86);
+    // A tilted witch hat; HEAD and the root keep their crown / sprout in its place.
+    if (this.appearance.topper === 'witch-hat' && !node.isHead && node.kind !== 'root')
+      addExtra('hat', this.kit.witchHat, radius * 1.5, radius * 1.2, radius * 0.1, radius * 1.05);
     if (node.kind === 'root') addExtra('sprout', this.kit.sprout, 0.62, 0.62, 0, radius + 0.16);
     if (node.isHead) addExtra('crown', this.kit.crown, 0.78, 0.62, 0.02, radius + 0.17);
     if (node.kind === 'feat')
@@ -804,7 +796,7 @@ export class LogGraphScene {
 
   private applyEdgeFocus(e: EdgeActor) {
     if (!e.view) return;
-    const dim = this.appearance.dim[this.theme];
+    const dim = this.appearance.dim;
     const u = e.view.material.uniforms;
     (u['uColor']!.value as THREE.Color).set(e.dimmed ? dim.body : e.baseColor);
     (u['uOutline']!.value as THREE.Color).set(e.dimmed ? dim.outline : this.appearance.outline);
@@ -974,6 +966,9 @@ export class LogGraphScene {
           ex.sprite.material.rotation = this.t * 0.8 * motion;
         } else if (ex.kind === 'horns') {
           ex.sprite.position.y = ex.base.y + Math.abs(w) * 0.03;
+        } else if (ex.kind === 'hat') {
+          ex.sprite.position.y = ex.base.y + Math.abs(w) * 0.04;
+          ex.sprite.material.rotation = -0.14 + w * 0.06;
         } else if (ex.kind === 'sweat') {
           ex.sprite.position.y = ex.base.y - ((this.t * 0.5 + a.phase) % 1) * 0.12 * motion;
         } else {

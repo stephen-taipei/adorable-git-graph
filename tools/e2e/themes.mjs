@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const THEME_CSS = /\/themes\/(candy|hacker)\.css(?:$|\?)(?!url)/;
+const THEME_CSS = /\/themes\/(candy|hacker|halloween)\.css(?:$|\?)(?!url)/;
 
 export async function verifyThemes({ browser, origin, artifacts }) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -14,7 +14,7 @@ export async function verifyThemes({ browser, origin, artifacts }) {
   const errors = [];
   let hold = 0;
   let fail = false;
-  await ctx.route(/\/themes\/(candy|hacker)\.css/, async (route) => {
+  await ctx.route(/\/themes\/(candy|hacker|halloween)\.css/, async (route) => {
     const url = route.request().url();
     if (/[?&]url\b/.test(url)) return route.continue(); // dev-only module exporting the URL
     requested.push(url.match(THEME_CSS)?.[1] ?? url);
@@ -123,6 +123,36 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     assert.deepEqual(requested, ['candy', 'hacker']);
     results.push({ label: 'switching swaps the one theme link behind the boot screen' });
 
+    // The next click cycles on to Halloween: its own stylesheet and pumpkin mascot.
+    await page.click('.web-skin');
+    await done();
+    await page.waitForFunction(
+      () => document.querySelector('.agg-root')?.getAttribute('data-theme-id') === 'halloween',
+    );
+    s = await state();
+    assert.equal(s.links.length, 1, 'still one managed theme link');
+    assert.deepEqual(s.applied, ['halloween'], 'only the halloween theme applied');
+    assert.equal(s.stored, 'halloween');
+    assert(
+      await page.evaluate(() => Boolean(document.querySelector('svg[data-variant="pumpkin"]'))),
+      'halloween shows the pumpkin mascot',
+    );
+    assert.deepEqual(requested, ['candy', 'hacker', 'halloween']);
+    results.push({ label: 'halloween theme loads its own stylesheet and pumpkin mascot' });
+
+    // And wraps back to the default theme, from the cached stylesheet.
+    await page.click('.web-skin');
+    await done();
+    await page.waitForFunction(
+      () => document.querySelector('.agg-root')?.getAttribute('data-theme-id') === 'candy',
+    );
+    await page.click('.web-skin');
+    await done();
+    await page.waitForFunction(
+      () => document.querySelector('.agg-root')?.getAttribute('data-theme-id') === 'hacker',
+    );
+    results.push({ label: 'theme button cycles through every theme' });
+
     // A reload fetches only the saved theme.
     requested.length = 0;
     await page.reload();
@@ -133,12 +163,60 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     assert.equal(s.root, 'hacker');
     results.push({ label: 'reload loads only the saved theme' });
 
-    // Screenshots of every theme × colour mode.
+    // Every theme offers its own light and dark schemes on the scheme button:
+    // auto → light → dark → auto, and the stylesheet's dark block applies.
+    for (const id of ['hacker', 'halloween', 'candy']) {
+      await page.evaluate((id) => {
+        localStorage.setItem('agg.theme-id', id);
+        localStorage.setItem('agg.theme', 'auto');
+      }, id);
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.reload();
+      await done();
+      await ready();
+      const lightInk = (await state()).tokens;
+      const seen = [];
+      for (let i = 0; i < 3; i++) {
+        await page.click('.web-theme');
+        await page.waitForFunction(
+          (want) => document.querySelector('.web-theme')?.dataset.scheme === want,
+          ['light', 'dark', 'auto'][i],
+        );
+        seen.push(
+          await page.evaluate(() => ({
+            stored: localStorage.getItem('agg.theme'),
+            scheme: document.querySelector('.agg-root')?.getAttribute('data-scheme'),
+            tone: document.querySelector('.agg-root')?.getAttribute('data-theme'),
+            html: document.documentElement.dataset.scheme,
+            ink: getComputedStyle(document.querySelector('.agg-root'))
+              .getPropertyValue('--agg-ink')
+              .trim(),
+          })),
+        );
+      }
+      assert.deepEqual(
+        seen.map((s) => [s.stored, s.scheme, s.tone, s.html]),
+        [
+          ['light', 'light', 'day', 'light'],
+          ['dark', 'dark', 'night', 'dark'],
+          ['auto', 'light', 'day', 'light'],
+        ],
+        `${id} scheme cycle`,
+      );
+      assert.equal(seen[0].ink, lightInk, `${id} light scheme uses the base tokens`);
+      if (id !== 'candy')
+        assert.notEqual(seen[1].ink, lightInk, `${id} dark scheme overrides tokens`);
+    }
+    results.push({ label: 'every theme cycles auto → light → dark colour schemes' });
+
+    // Screenshots of every theme × colour scheme.
     for (const [id, mode] of [
-      ['hacker', 'night'],
-      ['hacker', 'day'],
-      ['candy', 'day'],
-      ['candy', 'night'],
+      ['hacker', 'dark'],
+      ['hacker', 'light'],
+      ['halloween', 'dark'],
+      ['halloween', 'light'],
+      ['candy', 'light'],
+      ['candy', 'dark'],
     ]) {
       await page.evaluate(
         ({ id, mode }) => {
@@ -153,7 +231,7 @@ export async function verifyThemes({ browser, origin, artifacts }) {
       await page.waitForFunction(
         ({ id, mode }) => {
           const r = document.querySelector('.agg-root');
-          return r?.getAttribute('data-theme-id') === id && r?.getAttribute('data-theme') === mode;
+          return r?.getAttribute('data-theme-id') === id && r?.getAttribute('data-scheme') === mode;
         },
         { id, mode },
       );

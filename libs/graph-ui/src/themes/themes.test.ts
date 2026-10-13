@@ -3,7 +3,17 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PALETTE, recolorLayout } from '@adorable/graph-core';
 import type { GraphLayout } from '@adorable/graph-core';
-import { DEFAULT_THEME, THEME_APPEARANCES, THEME_IDS, isThemeId } from './config';
+import {
+  AUTO_SCHEME,
+  BASE_SCHEME_IDS,
+  DEFAULT_THEME,
+  THEME_APPEARANCES,
+  THEME_IDS,
+  isSchemeSetting,
+  isThemeId,
+  resolveScheme,
+  schemeCycle,
+} from './config';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const viewerCss = read('../viewer/viewer.css');
@@ -42,30 +52,39 @@ describe('theme family completeness', () => {
         a.outline,
         a.selection.outer,
         a.selection.inner,
-        a.dim.day.body,
-        a.dim.day.outline,
-        a.dim.night.body,
-        a.dim.night.outline,
+        ...a.schemes.flatMap((s) => [s.dim.body, s.dim.outline]),
         a.mascotColor,
       ])
         expect(c).toMatch(HEX);
     }
   });
 
+  it.each(THEME_IDS)('%s offers at least a light and a dark colour scheme', (id) => {
+    const { schemes } = THEME_APPEARANCES[id];
+    const ids = schemes.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(schemes[0]).toMatchObject({ id: 'light', tone: 'day' });
+    for (const base of BASE_SCHEME_IDS) expect(ids).toContain(base);
+    expect(schemes.find((s) => s.id === 'dark')?.tone).toBe('night');
+  });
+
   it.each(THEME_IDS)('%s has a stylesheet that defines every token the viewer needs', (id) => {
     expect(existsSync(fileURLToPath(new URL(`./${id}.css`, import.meta.url)))).toBe(true);
     const css = themeCss(id);
+    // The base block is the light scheme; every other scheme is one override block.
     const day = definedIn(block(css, `:where(.agg-root, .agg-theme-scope)[data-theme-id='${id}']`));
-    const night = block(
-      css,
-      `:where(.agg-root, .agg-theme-scope)[data-theme-id='${id}'][data-theme='night']`,
-    );
-    expect(night).not.toBe('');
     const needed = [...requiredTokens(viewerCss)].filter((t) => !definedIn(viewerCss).has(t));
     expect(needed.length).toBeGreaterThan(20);
     expect(needed.filter((t) => !day.has(t))).toEqual([]);
-    // Night only overrides tokens the day block defines, so both modes are complete.
-    expect([...definedIn(night)].filter((t) => !day.has(t))).toEqual([]);
+    for (const scheme of THEME_APPEARANCES[id].schemes.slice(1)) {
+      const own = block(
+        css,
+        `:where(.agg-root, .agg-theme-scope)[data-theme-id='${id}'][data-scheme='${scheme.id}']`,
+      );
+      expect(own, `${id} / ${scheme.id}`).not.toBe('');
+      // Schemes only override tokens the base block defines, so every scheme is complete.
+      expect([...definedIn(own)].filter((t) => !day.has(t))).toEqual([]);
+    }
     // Tokens a theme uses itself are defined by that theme.
     expect([...requiredTokens(css)].filter((t) => !day.has(t))).toEqual([]);
   });
@@ -82,6 +101,32 @@ describe('theme family completeness', () => {
   it('keeps colours out of the shared structure stylesheet', () => {
     expect(viewerCss).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
     expect(viewerCss).not.toContain("data-theme='night'");
+    expect(viewerCss).not.toContain('data-scheme');
+  });
+});
+
+describe('colour scheme resolution', () => {
+  it('auto follows the system tone', () => {
+    expect(resolveScheme('candy', AUTO_SCHEME, false).id).toBe('light');
+    expect(resolveScheme('candy', AUTO_SCHEME, true).id).toBe('dark');
+  });
+
+  it('reads the legacy day / night settings as that tone', () => {
+    expect(isSchemeSetting('day')).toBe(true);
+    expect(isSchemeSetting('night')).toBe(true);
+    expect(resolveScheme('hacker', 'day', true).id).toBe('light');
+    expect(resolveScheme('hacker', 'night', false).id).toBe('dark');
+  });
+
+  it.each(THEME_IDS)('%s resolves each of its schemes and cycles auto → schemes', (id) => {
+    const ids = THEME_APPEARANCES[id].schemes.map((s) => s.id);
+    for (const s of ids) expect(resolveScheme(id, s, false).id).toBe(s);
+    expect(schemeCycle(id)).toEqual([AUTO_SCHEME, ...ids]);
+  });
+
+  it('rejects unknown settings', () => {
+    expect(isSchemeSetting('sepia-nonexistent')).toBe(false);
+    expect(isSchemeSetting(3)).toBe(false);
   });
 });
 

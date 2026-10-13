@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DEFAULT_THEME, GitGraphViewer, THEME_IDS, isThemeId } from '@adorable/graph-ui';
+import {
+  AUTO_SCHEME,
+  DEFAULT_THEME,
+  GitGraphViewer,
+  THEME_IDS,
+  isSchemeSetting,
+  isThemeId,
+  resolveScheme,
+} from '@adorable/graph-ui';
 import type { DetailSize, ThemeId } from '@adorable/graph-ui';
-import { SourceBar, isThemeSetting } from './SourceBar';
+import { SourceBar } from './SourceBar';
 import { TokenDialog } from './TokenDialog';
 import { searchFromSource, sourceFromSearch } from './source';
 import type { Source } from './source';
@@ -23,10 +31,11 @@ import {
 
 const isDetailSize = (v: string): v is DetailSize => v === 'normal' || v === 'wide';
 
-const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈' };
+const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈', halloween: '🎃' };
 const THEME_ID_LABEL: Record<ThemeId, string> = {
   candy: t.themeIdCandy,
   hacker: t.themeIdHacker,
+  halloween: t.themeIdHalloween,
 };
 
 function usePrefersDark(): boolean {
@@ -64,8 +73,8 @@ export function App() {
   const lastLocal = useRef<Source>({ kind: 'local' });
   // 靜態建置只有預設 repo：網址裡的 ?local= 不用帶回去
   if (source.kind === 'local') lastLocal.current = import.meta.env.DEV ? source : { kind: 'local' };
-  // `agg.theme` keeps its historical meaning: the light/dark mode setting.
-  const [theme, setTheme] = useStored('agg.theme', 'auto', isThemeSetting);
+  // `agg.theme` is the colour-scheme setting: 'auto' or a scheme id (legacy 'day' / 'night' still read).
+  const [theme, setTheme] = useStored('agg.theme', AUTO_SCHEME, isSchemeSetting);
   const [themeId, setThemeId] = useStored('agg.theme-id', DEFAULT_THEME, isThemeId);
   const activeThemeId = useThemeStylesheet(themeId, {
     loading: t.themeLoading,
@@ -75,7 +84,8 @@ export function App() {
   // The viewer switches to a new theme only once its stylesheet has loaded.
   const viewerThemeId = activeThemeId ?? themeId;
   const prefersDark = usePrefersDark();
-  const mode = theme === 'auto' ? (prefersDark ? 'night' : 'day') : theme;
+  const scheme = resolveScheme(viewerThemeId, theme, prefersDark);
+  const mode = scheme.tone;
   const [auth, setAuth] = useState(initialAuth);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
@@ -159,15 +169,21 @@ export function App() {
     const html = document.documentElement;
     if (activeThemeId) html.dataset['themeId'] = activeThemeId;
     html.dataset['theme'] = mode;
-  }, [activeThemeId, mode]);
+    html.dataset['scheme'] = scheme.id;
+  }, [activeThemeId, mode, scheme.id]);
 
   return (
-    <div className="web-root agg-theme-scope" data-theme-id={viewerThemeId} data-theme={mode}>
+    <div
+      className="web-root agg-theme-scope"
+      data-theme-id={viewerThemeId}
+      data-theme={mode}
+      data-scheme={scheme.id}
+    >
       <GitGraphViewer
         title={title}
         state={state}
         diagnostics={diagnostics}
-        theme={theme === 'auto' ? 'auto' : theme}
+        theme={theme}
         themeId={viewerThemeId}
         locale={locale}
         sourceKey={sourceKey}
@@ -187,6 +203,8 @@ export function App() {
             lastLocal={lastLocal.current}
             onNavigate={navigate}
             theme={theme}
+            themeId={viewerThemeId}
+            scheme={scheme}
             onThemeChange={setTheme}
             themeExtra={
               <button

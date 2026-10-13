@@ -1,6 +1,7 @@
 import type { ThemeId } from '@adorable/graph-ui';
 import candyHref from '@adorable/graph-ui/themes/candy.css?url';
 import hackerHref from '@adorable/graph-ui/themes/hacker.css?url';
+import halloweenHref from '@adorable/graph-ui/themes/halloween.css?url';
 
 /**
  * Theme stylesheets are separate assets, requested only when that theme is
@@ -9,6 +10,7 @@ import hackerHref from '@adorable/graph-ui/themes/hacker.css?url';
 export const THEME_STYLESHEETS = {
   candy: candyHref,
   hacker: hackerHref,
+  halloween: halloweenHref,
 } satisfies Record<ThemeId, string>;
 
 export const THEME_LINK_ID = 'agg-theme-stylesheet';
