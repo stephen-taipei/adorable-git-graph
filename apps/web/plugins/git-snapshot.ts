@@ -14,6 +14,7 @@ import {
   GIT_LOG_FORMAT,
   GIT_REF_FORMAT,
   buildGitGraphData,
+  parseGitLog,
   parseForEachRef,
   selectRefs,
   coverage,
@@ -26,6 +27,7 @@ import {
   REPOS_ENDPOINT,
   SNAPSHOT_ENDPOINT,
   DIAGNOSTICS_ENDPOINT,
+  MAX_DEPTH,
   isRepoId,
   snapshotKey,
 } from '../src/protocol.ts';
@@ -94,6 +96,10 @@ const intFromEnv = (name: string): number | undefined => {
   const n = Number.parseInt(process.env[name] ?? '', 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
+
+/** 預設最多讀幾筆 commit（畫面捲到底時可以再要更多，見 RepoSession.want）。 */
+const defaultMaxCommits = (opts: SnapshotOptions): number =>
+  opts.maxCommits ?? intFromEnv('AGG_MAX_COMMITS') ?? 300;
 
 let gitBinary: { path: string | undefined; bin: string | null } | undefined;
 
@@ -345,7 +351,7 @@ export async function readGitSnapshot(
 
   try {
     const { dir, name } = await resolveRepo(repoDir);
-    const maxCommits = opts.maxCommits ?? intFromEnv('AGG_MAX_COMMITS') ?? 300;
+    const maxCommits = defaultMaxCommits(opts);
     const maxBranches = opts.maxBranches ?? intFromEnv('AGG_MAX_BRANCHES') ?? 8;
 
     const [refsText, originHead, currentBranch, remoteUrl, shallow] = await Promise.all([
@@ -398,14 +404,31 @@ export async function readGitSnapshot(
     ];
     let logText = tips.length ? await git(dir, logArgs(maxCommits, tips)) : '';
     // 其他 branch 很活躍時，default / 目前 branch 的 tip 可能比「最新 N 筆」還舊而整個被擠掉
-    // （圖上就沒有 default 的小球與皇冠）：另外保證它們各自最近的一段一定讀得到。
-    const guaranteed = selected.refs
-      .filter((r) => r.isDefault || r.name === currentBranch)
-      .map((r) => r.sha);
-    if (logText) {
-      // `git log -n` は複数の起点をまとめて数えるので、起点ごとに別々に取らないと保証にならない
-      for (const sha of new Set(guaranteed)) {
-        logText += await git(dir, logArgs(Math.min(maxCommits, 60), [sha]));
+    // （圖上就沒有 default 的小球與皇冠）：保證它們一定讀得到。
+    // 讀到的一律是 `--date-order` 的前 N 筆（往更早的歷史多讀時只會接在後面，不會插進已經顯示的列中間）：
+    // tip 不在裡面就把 N 加大到包含它；只有比 MAX_DEPTH 還深時才另外補上它最近的一段（不再是前綴）。
+    const guaranteed = [
+      ...new Set(
+        selected.refs.filter((r) => r.isDefault || r.name === currentBranch).map((r) => r.sha),
+      ),
+    ];
+    if (logText && guaranteed.length) {
+      const loaded = new Set(parseGitLog(logText).map((c) => c.sha));
+      const missing = guaranteed.filter((sha) => !loaded.has(sha));
+      if (missing.length) {
+        const order = (
+          await git(dir, ['rev-list', '--date-order', '-n', String(MAX_DEPTH), ...tips, '--'])
+        )
+          .split('\n')
+          .filter(Boolean);
+        const position = new Map(order.map((sha, i) => [sha, i]));
+        const deepest = Math.max(-1, ...missing.map((sha) => position.get(sha) ?? -1));
+        if (deepest + 1 > maxCommits) logText = await git(dir, logArgs(deepest + 1, tips));
+        // `git log -n` 把多個起點合起來算，所以要每個起點分開讀
+        for (const sha of missing) {
+          if (!position.has(sha))
+            logText += await git(dir, logArgs(Math.min(maxCommits, 60), [sha]));
+        }
       }
     }
 
@@ -744,6 +767,8 @@ class RepoSession {
   private watching = false;
   private starting: Promise<void> | undefined;
   private teardown: () => void = () => {};
+  /** 畫面要求過的 commit 數（infinite scroll）。之後的讀取與 HMR 推送都讀 max(預設, depth) 筆。 */
+  private depth = 0;
   readonly dir: string;
   private readonly hooks: SessionHooks;
 
@@ -752,9 +777,15 @@ class RepoSession {
     this.hooks = hooks;
   }
 
+  /** 往更早的歷史多讀一些：只增不減（停止監看後重新開啟的 session 會回到預設）。 */
+  want(depth: number): void {
+    this.depth = Math.max(this.depth, depth);
+  }
+
   async read(): Promise<GitSnapshot> {
     const snap = await readGitSnapshot(this.dir, {
       ...this.hooks.options,
+      maxCommits: Math.max(defaultMaxCommits(this.hooks.options), this.depth),
       onWarn: this.hooks.warn,
     });
     if (snap.graph) this.staleWarned = false;
@@ -987,6 +1018,13 @@ const SWEEP_MS = 60_000;
 /** 使用者手動加入的路徑最多記幾個。 */
 const MAX_ADDED = 50;
 const SCAN_TTL_MS = 5000;
+
+/** `depth` 參數：省略是 undefined、不合法是 null，其餘夾在 [1, MAX_DEPTH]。 */
+const parseDepth = (raw: string | null): number | null | undefined => {
+  if (raw === null) return undefined;
+  if (!/^\d{1,32}$/.test(raw)) return null;
+  return Math.min(MAX_DEPTH, Math.max(1, Number(raw)));
+};
 
 const VIRTUAL_ID = 'virtual:git-snapshot';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
@@ -1362,17 +1400,23 @@ export function gitSnapshot(options: SnapshotOptions = {}): Plugin {
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'method_not_allowed' });
       if (!isSameOrigin(req, true)) return sendJson(res, 403, { error: 'forbidden' });
       let id: string;
+      let depth: number | null | undefined;
       try {
-        id = new URL(req.url ?? '/', 'http://localhost').searchParams.get('repo') ?? DEFAULT_REPO;
+        const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
+        id = params.get('repo') ?? DEFAULT_REPO;
+        // infinite scroll：要更早的歷史就帶 depth（這個 repo 之後的讀取與 HMR 推送都至少讀這麼多筆）
+        depth = parseDepth(params.get('depth'));
       } catch {
         id = '';
       }
       if (!isRepoId(id)) return sendJson(res, 400, { error: 'invalid_repo' });
+      if (depth === null) return sendJson(res, 400, { error: 'invalid_depth' });
       if (id !== DEFAULT_REPO && !isLoopback(req))
         return sendJson(res, 403, { error: 'local_only' });
       void sessionFor(id)
         .then(async (session) => {
           if (!session) return sendJson(res, 404, { error: 'unknown_repo' });
+          if (depth) session.want(depth);
           await session.sync();
           sendJson(res, 200, session.last);
         })

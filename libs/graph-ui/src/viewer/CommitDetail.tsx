@@ -1,6 +1,7 @@
 import type { GraphBranch, GraphLayout, GraphNode } from '@adorable/graph-core';
 import { formatRelative } from '../i18n';
 import type { Locale, Messages } from '../i18n';
+import type { DetailSize } from '../scene/geometry';
 import { Avatar } from './Avatar';
 import { RefBadges } from './RefBadges';
 import { copyText, formatAbsolute } from './format';
@@ -10,7 +11,9 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   CloseIcon,
+  CollapseIcon,
   CopyIcon,
+  ExpandIcon,
   ExternalIcon,
   MergeIcon,
 } from './icons';
@@ -30,6 +33,10 @@ export interface CommitDetailProps {
   onOpenCommit?: (node: GraphNode) => void;
   /** 點作者名稱＝以作者搜尋 */
   onSearch?: (query: string) => void;
+  /** 面板目前的大小（「寬版詳情面板」切換鈕的 aria-pressed） */
+  detailSize?: DetailSize;
+  /** 切換面板大小。沒給就不顯示按鈕（窄螢幕的底部面板本來就是全寬） */
+  onToggleSize?: () => void;
 }
 
 function CopyButton({ text, label, t }: { text: string; label: string; t: Messages }) {
@@ -86,6 +93,8 @@ export function CommitDetail({
   onGoto,
   onOpenCommit,
   onSearch,
+  detailSize = 'normal',
+  onToggleSize,
 }: CommitDetailProps) {
   const parents = [...new Set(node.parents)];
   const body = node.message.split('\n').slice(1).join('\n').trim();
@@ -120,6 +129,19 @@ export function CommitDetail({
           >
             <ChevronDownIcon />
           </button>
+          {onToggleSize && (
+            <button
+              type="button"
+              className="agg-btn agg-btn--sm agg-detail-size"
+              onClick={onToggleSize}
+              // 切換鈕：名稱固定（「寬版詳情面板」），狀態由 aria-pressed 表示；名稱跟著狀態換會唸成「還原寬度，已按下」
+              aria-pressed={detailSize === 'wide'}
+              title={t.detailWide}
+              aria-label={t.detailWide}
+            >
+              {detailSize === 'wide' ? <CollapseIcon /> : <ExpandIcon />}
+            </button>
+          )}
           <button
             type="button"
             className="agg-btn agg-btn--sm agg-btn--danger"

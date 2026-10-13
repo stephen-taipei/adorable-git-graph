@@ -344,6 +344,73 @@ esac
     expect(g.commits.some((c) => c.message === 'main: old tip')).toBe(true);
     expect(buildLayout(g).nodes.find((n) => n.isHead)?.subject).toBe('main: old tip');
   });
+
+  it('a deeper read only appends: the loaded commits are always a --date-order prefix (the default tip is reached by reading deeper)', async () => {
+    const dir = tmp('agg-prefix-');
+    git(dir, 'init', '-q', '-b', 'main');
+    for (let i = 0; i < 5; i++) commit(dir, `main ${i}`);
+    // 兩條比 main 新、日期交錯的 branch：main 的 tip 比「最新 N 筆」舊
+    git(dir, 'branch', 'b', 'HEAD~2');
+    git(dir, 'checkout', '-q', '-b', 'a');
+    for (let i = 0; i < 6; i++) {
+      commit(dir, `a ${i}`);
+      git(dir, 'checkout', '-q', 'b');
+      commit(dir, `b ${i}`);
+      git(dir, 'checkout', '-q', 'a');
+    }
+    const mainTip = git(dir, 'rev-parse', 'main');
+    const order = git(dir, 'rev-list', '--date-order', 'main', 'a', 'b').split('\n');
+    const mainAt = order.indexOf(mainTip);
+    expect(mainAt).toBe(12);
+    let previous: string[] = [];
+    for (const n of [3, 5, 13, 14, 17]) {
+      const shas = (await readGitSnapshot(dir, { maxCommits: n })).graph!.commits.map((c) => c.sha);
+      expect(shas.length, String(n)).toBe(Math.max(n, mainAt + 1));
+      expect(new Set(shas), String(n)).toEqual(new Set(order.slice(0, shas.length)));
+      expect(shas).toContain(mainTip);
+      // 讀得更深時只會在後面多出更早的 commit
+      expect(shas.slice(0, previous.length)).toEqual(previous);
+      previous = shas;
+    }
+  });
+
+  it('only a default tip deeper than MAX_DEPTH falls back to reading its own recent segment', async () => {
+    const dir = tmp('agg-very-deep-');
+    git(dir, 'init', '-q', '-b', 'main');
+    // main = 很舊的一筆；busy 在它之後還有 5002 筆（比 MAX_DEPTH 深）
+    const lines = [
+      'commit refs/heads/main',
+      'mark :1',
+      'committer Amy <amy@example.test> 1000000000 +0000',
+      'data 9',
+      'main: old',
+      '',
+    ];
+    for (let i = 0; i < 5002; i++) {
+      lines.push(
+        'commit refs/heads/busy',
+        `committer Amy <amy@example.test> ${1000000001 + i} +0000`,
+        `data ${`busy ${i}`.length}`,
+        `busy ${i}`,
+        ...(i === 0 ? ['from :1'] : []),
+        '',
+      );
+    }
+    execFileSync('git', ['fast-import', '--quiet'], {
+      cwd: dir,
+      env: env(),
+      input: `${lines.join('\n')}\n`,
+    });
+    git(dir, 'symbolic-ref', 'HEAD', 'refs/heads/busy');
+    const g = (await readGitSnapshot(dir, { maxCommits: 3 })).graph!;
+    expect(g.commits.map((c) => c.message)).toEqual([
+      'busy 5001',
+      'busy 5000',
+      'busy 4999',
+      'main: old',
+    ]);
+    expect(g.refs.find((r) => r.isDefault)?.name).toBe('main');
+  });
 });
 
 async function awaitWatcherReady(gitDir: string, calls: () => number) {
@@ -495,6 +562,7 @@ describe('gitSnapshot plugin (dev server behaviour)', () => {
       scanDepth?: number;
       stateFile?: string | false;
       idleMs?: number;
+      maxCommits?: number;
     } = {},
   ) {
     return startWith(gitSnapshot({ repoDir, pollMs, stateFile: false, ...extra }), repoDir);
@@ -1162,6 +1230,79 @@ describe('gitSnapshot plugin (dev server behaviour)', () => {
       const names = (await p.repos()).json().repos.map((x: { name: string }) => x.name);
       expect(names).toEqual(['alpha', 'zeta']);
       expect((await p.snapshotOf(repoIdFor(r.beta))).status).toBe(404); // 不在範圍內
+    } finally {
+      await p.close();
+    }
+  });
+
+  it(
+    'depth: loads older history on request, keeps it for later reads, HMR pushes and the virtual module, rejects malformed values',
+    { timeout: 30_000 },
+    async () => {
+      const dir = realpathSync(tmp('agg-depth-'));
+      git(dir, 'init', '-q', '-b', 'main');
+      for (let i = 0; i < 20; i++) commit(dir, `c${i}`);
+      const p = await startPlugin(dir, 0, { repoRoots: [dir], maxCommits: 5 });
+      const graphAt = async (url: string) => {
+        const res = await p.call({ url });
+        expect(res.status, url).toBe(200);
+        return res.json().graph as { commits: Array<{ message: string }>; truncated: boolean };
+      };
+      try {
+        const first = await graphAt('/');
+        expect(first.commits).toHaveLength(5);
+        expect(first.truncated).toBe(true);
+        const deeper = await graphAt('/?repo=default&depth=12');
+        expect(deeper.commits).toHaveLength(12);
+        expect(deeper.truncated).toBe(true);
+        expect((await graphAt('/')).commits).toHaveLength(12); // 之後沒帶 depth 也維持
+        expect((await graphAt('/?depth=3')).commits).toHaveLength(12); // 只增不減
+        expect((await graphAt('/?depth=0')).commits).toHaveLength(12); // 夾到 1
+        // 新 commit 的 HMR 推送也是 12 筆（最新的一定在裡面）
+        commit(dir, 'c20');
+        const pushed = () =>
+          p.sent.find((m) =>
+            (m.data.snapshot?.graph?.commits as Array<{ message: string }> | undefined)?.some(
+              (c) => c.message === 'c20',
+            ),
+          );
+        await waitFor(() => pushed() !== undefined, 8000);
+        expect(pushed()!.data.snapshot!.graph!.commits).toHaveLength(12);
+        // 重新整理頁面拿到的 virtual module 也是
+        const mod = (await p.plugin.load('\0virtual:git-snapshot'))!;
+        expect(
+          JSON.parse(mod.replace(/^export default /, '').replace(/;$/, '')).graph.commits,
+        ).toHaveLength(12);
+        // 上限是 MAX_DEPTH（5000）：超過的數字夾到上限
+        const all = await graphAt('/?depth=99999999999');
+        expect(all.commits).toHaveLength(21);
+        expect(all.truncated).toBe(false);
+        for (const bad of ['abc', '-1', '1.5', '', '1e3', '%205', '0x10', '1'.repeat(40)]) {
+          const res = await p.call({ url: `/?depth=${bad}` });
+          expect([res.status, res.json().error], bad).toEqual([400, 'invalid_depth']);
+        }
+      } finally {
+        await p.close();
+      }
+    },
+  );
+
+  it('depth is kept per repository (LAN clients may page the default repo, never the others)', async () => {
+    const r = makeRoot();
+    const p = await startPlugin(r.alpha, 0, { maxCommits: 1 });
+    try {
+      const beta = repoIdFor(r.beta);
+      expect((await p.snapshotOf(beta)).json().graph.commits).toHaveLength(1);
+      expect((await p.call({ url: `/?repo=${beta}&depth=2` })).json().graph.commits).toHaveLength(
+        2,
+      );
+      expect((await p.snapshotOf(beta)).json().graph.commits).toHaveLength(2);
+      expect((await p.request()).json().graph.commits).toHaveLength(1); // 預設 repo 不受影響
+      const lan = '192.168.1.23';
+      expect((await p.call({ url: '/?depth=2', remote: lan })).json().graph.commits).toHaveLength(
+        2,
+      );
+      expect((await p.call({ url: `/?repo=${beta}&depth=3`, remote: lan })).status).toBe(403);
     } finally {
       await p.close();
     }

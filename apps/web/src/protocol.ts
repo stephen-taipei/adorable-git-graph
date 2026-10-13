@@ -17,6 +17,8 @@ export type SnapshotErrorCode = 'missing_dir' | 'not_git' | 'no_git' | 'unsafe_r
 export const HMR_EVENT = 'agg:git-snapshot';
 /** `GET ?repo=<id>`：某個本機 repo 的快照（省略 repo = 預設 repo）。只有 dev server 有。 */
 export const SNAPSHOT_ENDPOINT = '/__agg/git-snapshot';
+/** 一次最多讀幾筆 commit（infinite scroll 的上限；SNAPSHOT_ENDPOINT 的 `depth` 參數會夾在這個值以內）。 */
+export const MAX_DEPTH = 5000;
 /** POST JSON; read-only, same-origin AND loopback for all repositories. */
 export const DIAGNOSTICS_ENDPOINT = '/__agg/diagnostics';
 /** `GET`：dev server 掃描到、可以選擇的本機 repo 清單。只有 dev server 有。 */

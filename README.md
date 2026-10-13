@@ -43,6 +43,9 @@ pnpm build            # 建置所有專案：Chrome → apps/extension/dist、Fi
   （`$XDG_STATE_HOME`；Windows 為 `%LOCALAPPDATA%\adorable-git-graph\`；`AGG_LOCAL_REPOS_FILE` 可改位置），重開後仍在清單裡；要移除就編輯或刪掉這個檔案。
   選單可以用鍵盤上下瀏覽：停下來（或按 Enter）才會切換，不會每經過一個 repo 就讀一次。
   回到這個分頁時清單會重新掃描（剛 `git clone` 的 repo 會出現）。
+- **更早的歷史**：捲到底會自動載入下一批（本機一次多 300 筆，最多 5000 筆；GitHub 從每條 branch 缺的 parent 往回各抓一頁），
+  載入時不會移動你正在看的位置、不會重播動畫；失敗時頁尾顯示「再試一次」，不會自己一直重試。靜態建置沒有後端可讀，維持「更早的歷史已省略」。
+  診斷面板的涵蓋範圍（commit 數、是否讀到歷史起點）跟著載入的範圍更新。
 - 標題列下方的 `📍 本機 | 🐙 GitHub`：切到 GitHub 後輸入 `owner/repo` 或 GitHub 網址（也可直接開 `/?repo=owner/repo`），
   從瀏覽器直接呼叫 GitHub REST API（與 extension 同一套 `fetchGitHubGraph`），結果快取 10 分鐘。
   未登入每小時 60 次，點 ⚙ 可貼入 fine-grained PAT（只存 localStorage、只送往 `api.github.com`；更換 / 清除 token 會一併清掉快取）。
@@ -139,7 +142,7 @@ pnpm --filter @adorable/extension-firefox package:source  # → web-ext-artifact
 | 線圖欄     | 每個 commit 一顆小球（類型決定表情：`feat` 大笑、`fix` 冒汗、`merge` 較大顆、root 長嫩芽、default branch 最新 commit 戴皇冠），一條 lane 一欄、default branch 在最左；branch 是流動著箭頭的管線，fork / merge 以 S 曲線轉彎                                                                |
 | 每一列     | branch / tag 標籤（`HEAD ➜ main`、★ default、☁ remote 虛線、⚑ tag）、merge 標記、`feat` / `fix` 類型小標籤、作者、日期（寬螢幕顯示絕對時間、窄螢幕顯示相對時間）、短 SHA（點一下複製完整 SHA）                                                                                             |
 | 工具列     | 搜尋（說明 / 作者 / sha / branch / tag，多個詞要同時符合，不符合的列淡化；`Enter` / `Shift+Enter` 跳到下一筆 / 上一筆）、統計（commit / branch / tag / 作者 / merge 數量與最新 commit 時間）、branch 篩選（點一下只看該 branch 的歷史並捲到它的最新 commit，顯示領先 default 幾個 commit） |
-| 詳情       | 點任一列：完整說明、完整 SHA（可複製）、作者、時間、parent / child（可跳轉）、指到這裡的 branch / tag、「包含於哪些 branch」（只算已載入範圍）、上一個 / 下一個、「在 GitHub 開啟」                                                                                                        |
+| 詳情       | 點任一列：完整說明、完整 SHA（可複製）、作者、時間、parent / child（可跳轉）、指到這裡的 branch / tag、「包含於哪些 branch」（只算已載入範圍）、上一個 / 下一個、「在 GitHub 開啟」；標題列的 ⤢ 切換一般 / 寬版面板（寬螢幕約半個畫面，中螢幕加寬抽屜，窄螢幕是底部面板所以不顯示）        |
 | 鍵盤       | `↑` `↓` / `j` `k` 選取上 / 下一個、`Home` `End`、`/` 搜尋；`Esc` 一次收一層：詳情 → 搜尋文字 → branch 聚焦 → 關閉 overlay                                                                                                                                                                  |
 | 工具列按鈕 | ▶ 重播進場動畫（目前可視範圍）、⤒ 回到最新、↻ 重新抓取（背景重抓，捲動位置與選取不動，按鈕轉圈）、⚙ 設定                                                                                                                                                                                   |
 
@@ -170,7 +173,8 @@ pnpm e2e              # 真實瀏覽器：web app + Chrome extension + Firefox e
 在假的 `github.com` 頁面上驗證 FAB、overlay、繪圖、頁面不被捲動、按鍵不洩漏到頁面、Esc 分層、404 / rate-limit 錯誤畫面、快取命中與強制重抓、設定頁與 token 傳遞，截圖輸出到 `apps/extension/e2e/.artifacts/`。
 **web**（`apps/web/e2e`）：啟動真正的 dev server，對一個臨時建立的 git repo 驗證本機快照、**commit / 建 branch 後畫面即時更新且不重新整理**（含捲動錨定）、
 連續多次 commit / 切 branch、cross-origin 讀不到 dev endpoint、本機 repo 選單（掃描範圍、切換 / 上一頁 / deep link、選到的 repo 即時更新、手動輸入路徑與錯誤訊息、跨站無法新增路徑、窄螢幕不溢出）、GitHub 來源切換（輸入驗證、404、rate limit、deep link 與快取、token 不外洩且移除後不留帶 token 的快取）、
-主題記憶、本機 build + preview（快照烤進 bundle、無 Refresh、dev endpoint 不存在）。
+主題記憶、本機 build + preview（快照烤進 bundle、無 Refresh、dev endpoint 不存在）、
+infinite scroll（本機 705 筆 / GitHub mock：捲到底分批載入、不跳動不重播、錯誤與再試一次）、詳情面板寬 / 窄切換。
 
 **Firefox extension**（`apps/extension-firefox/e2e`）：用 puppeteer-core 經 WebDriver BiDi 驅動**真正的 Firefox**，載入打包後的 add-on（等同「載入暫時性附加元件」），
 頁面由本機假的 github 伺服器提供（e2e 版 manifest 額外比對 `http://127.0.0.1/*`，所以跑的不是正式 manifest；正式 manifest 由單元測試、`web-ext lint` 與 `release` 的產物檢查把關）。
@@ -233,10 +237,10 @@ tools/e2e/              e2e 共用：Chrome 偵測、mock GitHub API（含 CORS�
 
 ## 已知限制
 
-- 只顯示最近約 60 筆 × 分支數的歷史，更早的以「… 歷史已省略」標示；超大 repo 不會是完整圖。
+- GitHub 來源第一次只抓每條 branch 最近約 60 筆，更早的捲到底才分批載入（每批都要呼叫 API，未登入額度很快用完）。
 - 未登入時額度很小，連續開多個 repo 會遇到 rate limit（畫面會提示，並可跳到設定頁）。
 - GitHub 來源目前只支援 github.com（不含 GitHub Enterprise、GitLab）；本機來源則任何 git repo 都可以。
-- web app 的本機快照預設讀最近 300 筆 commit、最多 8 條 branch（可用環境變數調整）。
+- web app 的本機快照預設讀最近 300 筆 commit、最多 8 條 branch（可用環境變數調整），捲到底最多再載入到 5000 筆。
 - 本機 repo 選單只在 `pnpm start`（dev server）時有；靜態建置只有建置當下的預設 repo。Chrome / Firefox extension 讀的是 GitHub，不能選本機 repo。
 - 瀏覽器無法取得資料夾的實際路徑，所以「開啟其他路徑」要自己輸入路徑，沒有原生的資料夾選擇視窗。
 - 動畫在無 GPU 的環境（軟體 WebGL）會明顯掉幀，屬預期。

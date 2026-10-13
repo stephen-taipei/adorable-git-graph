@@ -43,6 +43,13 @@ export interface Messages {
   branchTitle: (name: string, sha: string, commits: number, ahead: number, base: string) => string;
   filtering: (n: number, total: number) => string;
   startOfHistory: string;
+  // 更早的歷史（infinite scroll）
+  loadMore: string;
+  loadingMore: string;
+  loadMoreFailed: string;
+  loadedMore: (n: number) => string;
+  /** 頁尾（載入更早的歷史的按鈕與訊息）在無障礙樹裡的群組名稱 */
+  olderHistory: string;
   // 標籤
   headLabel: string;
   mergeLabel: string;
@@ -71,6 +78,8 @@ export interface Messages {
   noMessage: string;
   prevCommit: string;
   nextCommit: string;
+  /** 詳情面板大小的切換鈕（aria-pressed＝目前是寬版）：名稱固定，不隨狀態改變 */
+  detailWide: string;
   kinds: Record<string, string>;
   errors: Record<string, string>;
   rateLimitReset: (time: string) => string;
@@ -120,6 +129,11 @@ const zhTW: Messages = {
     `${name} · ${sha} · ${commits} 個 commit${ahead > 0 ? ` · 比 ${base} 多 ${ahead} 個` : ''}`,
   filtering: (n, total) => `顯示 ${n} / ${total} 個 commit`,
   startOfHistory: '最初的 commit 在這裡',
+  loadMore: '載入更早的歷史',
+  loadingMore: '正在載入更早的歷史…',
+  loadMoreFailed: '更早的歷史載入失敗',
+  loadedMore: (n) => `已載入 ${n} 個更早的 commit`,
+  olderHistory: '更早的歷史',
   headLabel: 'HEAD',
   mergeLabel: 'merge',
   remoteLabel: '遠端分支',
@@ -146,6 +160,7 @@ const zhTW: Messages = {
   noMessage: '（沒有說明）',
   prevCommit: '上一個（較新）',
   nextCommit: '下一個（較舊）',
+  detailWide: '寬版詳情面板',
   kinds: {
     root: '初始',
     merge: '合併',
@@ -212,6 +227,11 @@ const en: Messages = {
     `${name} · ${sha} · ${commits} commit${commits === 1 ? '' : 's'}${ahead > 0 ? ` · ${ahead} ahead of ${base}` : ''}`,
   filtering: (n, total) => `Showing ${n} of ${total} commits`,
   startOfHistory: 'the first commit lives here',
+  loadMore: 'Load older history',
+  loadingMore: 'Loading older history…',
+  loadMoreFailed: 'Could not load older history',
+  loadedMore: (n) => `Loaded ${n} older commit${n === 1 ? '' : 's'}`,
+  olderHistory: 'Older history',
   headLabel: 'HEAD',
   mergeLabel: 'merge',
   remoteLabel: 'remote branch',
@@ -238,6 +258,7 @@ const en: Messages = {
   noMessage: '(no message)',
   prevCommit: 'Previous (newer)',
   nextCommit: 'Next (older)',
+  detailWide: 'Wide details panel',
   kinds: {
     root: 'initial',
     merge: 'merge',
@@ -270,11 +291,18 @@ export function getMessages(locale: Locale): Messages {
   return locale === 'zh-TW' ? zhTW : en;
 }
 
+// Intl 物件建立很貴：幾千列的列表每列都 new 一個會讓載入更早的歷史時卡一下，按語系快取
+const rtfCache = new Map<Locale, Intl.RelativeTimeFormat>();
+
 export function formatRelative(iso: string, locale: Locale, now = Date.now()): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return '';
   const diff = (ms - now) / 1000;
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  let rtf = rtfCache.get(locale);
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+    rtfCache.set(locale, rtf);
+  }
   const abs = Math.abs(diff);
   if (abs < 60) return rtf.format(Math.round(diff), 'second');
   if (abs < 3600) return rtf.format(Math.round(diff / 60), 'minute');
