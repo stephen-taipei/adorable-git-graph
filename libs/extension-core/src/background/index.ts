@@ -2,16 +2,20 @@ import {
   GitHubError,
   cacheDiagnostics,
   createGitHubDiagnostics,
+  fetchGitHubCommitsFrom,
   fetchGitHubGraph,
   isDiagnosticRequest,
   isValidRepoSegment,
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphData } from '@adorable/graph-core';
+import { parseFetchMore } from '../shared/history';
+import { FETCH_MORE_MAX_STARTS } from '../shared/messages';
 import type {
   BgError,
   BgRequest,
   BgResponse,
   FetchGraphResponse,
+  FetchMoreResponse,
   RateLimitResponse,
   TabCommand,
 } from '../shared/messages';
@@ -34,6 +38,7 @@ interface CacheEntry {
 }
 
 const inflight = new Map<string, Promise<FetchGraphResponse>>();
+const inflightMore = new Map<string, Promise<FetchMoreResponse>>();
 const diagnosticRequests = new Map<string, AbortController>();
 const diagnosticAdapters = new Map<string, DiagnosticAdapter>();
 const recoveryNotifications = new Map<number, { generation: string; promise: Promise<void> }>();
@@ -102,6 +107,7 @@ function rotateGeneration() {
   diagnosticAdapters.clear();
   recoveryNotifications.clear();
   inflight.clear();
+  inflightMore.clear();
   void invalidateCache().catch(() => {});
   // Delivery and cache removal are independent; slow storage must not preserve old adapters.
   void chrome.tabs
@@ -290,6 +296,36 @@ async function fetchGraph(req: GraphRequest): Promise<FetchGraphResponse> {
   }
 }
 
+/**
+ * infinite scroll：從 content script 給的 missing parent 各往回抓一頁（每頁筆數 = 設定的「每條分支抓幾筆」）。
+ * 不寫快取：快取只存第一批，重新整理 / 換 repo 都從第一批重新開始。
+ * `generation` 是第一批回傳的 diagnosticGeneration：設定（token）換過之後就不再用新的 credential 補舊的圖。
+ */
+async function fetchMore(
+  req: Extract<BgRequest, { type: 'fetch-more' }>,
+): Promise<FetchMoreResponse> {
+  try {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    await withinRequest(cacheInvalidation, signal);
+    const scoped = await withinRequest(readScopedSettings(), signal);
+    assertGeneration(scoped.generation, req.generation);
+    const commits = await withinRequest(
+      fetchGitHubCommitsFrom(req.owner, req.repo, req.shas, {
+        token: scoped.settings.token || undefined,
+        apiBase: __AGG_API_BASE__,
+        perPage: scoped.settings.maxCommitsPerBranch,
+        maxStarts: FETCH_MORE_MAX_STARTS,
+        signal,
+      }),
+      signal,
+    );
+    await validateSettingsScope(scoped, signal);
+    return { ok: true, data: { commits } };
+  } catch (err) {
+    return { ok: false, error: toError(err) };
+  }
+}
+
 async function rateLimit(): Promise<RateLimitResponse> {
   const settings = await loadSettings();
   try {
@@ -422,6 +458,30 @@ chrome.runtime.onMessage.addListener(
           return false;
         }
         void fetchGraph(req).then(sendResponse);
+        return true;
+      }
+      case 'fetch-more': {
+        // content script 送來的內容一律重新驗證（repo 名稱、40 位 hex 的 sha、起點數量），不合法就不碰網路
+        const more = parseFetchMore(req);
+        if (!more) {
+          sendResponse({ ok: false, error: { code: 'invalid', message: 'Invalid request' } });
+          return false;
+        }
+        const key = JSON.stringify([
+          more.generation,
+          more.owner,
+          more.repo,
+          ...more.shas,
+        ]).toLowerCase();
+        let p = inflightMore.get(key);
+        if (!p) {
+          const pending = fetchMore(more).finally(() => {
+            if (inflightMore.get(key) === pending) inflightMore.delete(key);
+          });
+          inflightMore.set(key, pending);
+          p = pending;
+        }
+        void p.then(sendResponse);
         return true;
       }
       case 'rate-limit':

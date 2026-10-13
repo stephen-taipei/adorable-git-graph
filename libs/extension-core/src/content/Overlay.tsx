@@ -18,7 +18,10 @@ export function Overlay({
   onClose: () => void;
   epoch?: number;
 }) {
-  const { state, refresh, diagnostics, diagnosticGeneration } = useGraph(repo, epoch);
+  const { state, refresh, diagnostics, diagnosticGeneration, loadMore, history } = useGraph(
+    repo,
+    epoch,
+  );
   const panelRef = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
 
@@ -124,6 +127,8 @@ export function Overlay({
             }
             theme={githubTheme()}
             onRefresh={refresh}
+            onLoadMore={loadMore}
+            history={history}
             onClose={onClose}
             onOpenSettings={() => void sendToBackground({ type: 'open-options' })}
           />

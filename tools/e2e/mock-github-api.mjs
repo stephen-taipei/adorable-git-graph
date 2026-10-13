@@ -1,4 +1,6 @@
-// e2e 共用：假的 GitHub REST API（只實作 graph-core 的 fetchGitHubGraph 會用到的端點）。
+// e2e 共用：假的 GitHub REST API（只實作 graph-core 的 fetchGitHubGraph / fetchGitHubCommitsFrom 與唯讀診斷會用到的端點）。
+// repo：demo/adorable-git-graph（SPECS，22 筆；fork/adorable-git-graph 是同一份）與 demo/long-history（LONG，infinite scroll 用的長歷史）。
+// `/commits?sha=` 可以是 branch 名稱，也可以是 40 位 hex 的 commit sha（infinite scroll 從 missing parent 往回抓）。
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 
@@ -31,34 +33,93 @@ export const SPECS = [
   ['m12', ['m11'], 'Revert "feat: branch legend"', 'amy', 114],
   ['m13', ['m12'], 'docs: usage gif', 'amy', 120],
 ];
-const byId = new Map(
-  SPECS.map((s) => [s[0], { id: s[0], parents: s[1], msg: s[2], author: s[3], at: T0 + s[4] * H }]),
+const HEADS = { main: 'm13', 'feat/dark-mode': 'y2', 'release/v0.1': 'r2', 'a-old': 'm1' };
+const TAGS = { 'v0.1.0': 'r2', 'v0.0.1': 'm3' };
+
+/**
+ * infinite scroll 用的長歷史 demo/long-history（共 LONG.total 筆）：
+ *   main 一條直線 L1 ← L2 ← … ← L150（每 2 小時一筆，L150 最新）；
+ *   已合併的舊 topic：T1 ← T2 ← T3 從 L60 分出、在 L70 合併（L70 = merge [L69, T3]，T 的時間夾在 L61–L66 之間）；
+ *   沒合併的 feat/long-side：S1 ← S2 從 L146 分出。
+ *   tag：v2.0 在 L148（第一批就有）、v1.0 在 L40（要往回載入幾批之後才出現）。
+ * 每條 branch 只抓一頁（per_page）時，第一批只有最新的一段，其餘靠 `/commits?sha=<missing parent>` 往回抓。
+ */
+const LONG_N = 150;
+const LONG_PREFIX = ['feat', 'fix', 'docs', 'chore', 'refactor', 'test'];
+const LONG_AUTHORS = ['amy', 'ben', 'cat'];
+const longSpecs = [];
+for (let i = 1; i <= LONG_N; i++) {
+  const parents = i === 1 ? [] : i === 70 ? ['L69', 'T3'] : [`L${i - 1}`];
+  const msg =
+    i === 1
+      ? 'chore: start the long history'
+      : i === 70
+        ? "Merge branch 'topic/old-parser'"
+        : `${LONG_PREFIX[i % LONG_PREFIX.length]}: long history step ${i}`;
+  longSpecs.push([`L${i}`, parents, msg, LONG_AUTHORS[i % 3], i * 2]);
+}
+longSpecs.push(
+  ['T1', ['L60'], 'feat: old parser draft', 'ben', 123],
+  ['T2', ['T1'], 'fix: old parser edge case', 'ben', 127],
+  ['T3', ['T2'], 'test: old parser cases', 'ben', 131],
+  ['S1', ['L146'], 'feat: long side branch', 'cat', 293],
+  ['S2', ['S1'], 'fix: long side branch polish', 'cat', 297],
 );
+export const LONG = {
+  owner: 'demo',
+  name: 'long-history',
+  /** 與 SPECS 同格式：[id, parents, message, author, hours] */
+  specs: longSpecs,
+  heads: { main: `L${LONG_N}`, 'feat/long-side': 'S2' },
+  tags: { 'v2.0': 'L148', 'v1.0': 'L40' },
+  total: longSpecs.length,
+};
+
 export const OUTSIDE_SHA = sha('outside');
-byId.set('outside', {
+/** 不在任何 branch 上、`/commits?sha=` 也抓不到的 commit（只有 /commits/:sha、compare 與 PR head 認得它）。 */
+const OUTSIDE = {
   id: 'outside',
   parents: ['y2'],
   msg: 'feat: outside graph window',
   author: 'ben',
   at: T0 + 97 * H,
-});
-const HEADS = { main: 'm13', 'feat/dark-mode': 'y2', 'release/v0.1': 'r2', 'a-old': 'm1' };
+};
 
-const ancestors = (id) => {
+function makeRepo(name, specs, heads, tags, hidden = []) {
+  const byId = new Map(
+    specs.map((s) => [
+      s[0],
+      { id: s[0], parents: s[1], msg: s[2], author: s[3], at: T0 + s[4] * H },
+    ]),
+  );
+  // 往回抓（/commits?sha=）只認 specs 裡的 commit
+  const bySha = new Map([...byId.keys()].map((id) => [sha(id), id]));
+  for (const c of hidden) byId.set(c.id, c);
+  return { name, byId, bySha, heads, tags };
+}
+const REPOS = new Map(
+  [
+    makeRepo('adorable-git-graph', SPECS, HEADS, TAGS, [OUTSIDE]),
+    makeRepo(LONG.name, LONG.specs, LONG.heads, LONG.tags),
+  ].map((r) => [r.name, r]),
+);
+
+/** id 的所有祖先（含自己），由新到舊（與 GitHub 的 /commits 一樣是時間倒序）。 */
+const ancestors = (repo, id) => {
   const seen = new Set();
   const stack = [id];
   while (stack.length) {
     const cur = stack.pop();
     if (seen.has(cur)) continue;
     seen.add(cur);
-    byId.get(cur).parents.forEach((p) => stack.push(p));
+    repo.byId.get(cur).parents.forEach((p) => stack.push(p));
   }
-  return [...seen].map((i) => byId.get(i)).sort((a, b) => b.at - a.at);
+  return [...seen].map((i) => repo.byId.get(i)).sort((a, b) => b.at - a.at);
 };
 
-const apiCommit = (c, base) => ({
+const apiCommit = (repo, c, base) => ({
   sha: sha(c.id),
-  html_url: `https://github.com/demo/adorable-git-graph/commit/${sha(c.id)}`,
+  html_url: `https://github.com/demo/${repo.name}/commit/${sha(c.id)}`,
   parents: c.parents.map((p) => ({ sha: sha(p) })),
   commit: {
     message: c.msg,
@@ -74,10 +135,33 @@ export const seen = { auth: [], paths: [], pending: 0 };
  * 轉圈根本不會出現；要驗證轉圈的步驟把這個調高，結束後記得歸零。
  */
 export const latency = { ms: 0 };
+/**
+ * 故障注入：接下來 `more` 個「從 commit sha 往回抓」（`/commits?sha=<40 位 hex>`）的請求回 502（驗證「載入失敗 → 再試一次」）。
+ * 只影響 infinite scroll 的請求；branch 名稱的請求（第一批）不受影響。
+ */
+export const faults = { more: 0 };
+/**
+ * 暫停「從 commit sha 往回抓」的請求：`gate.hold = true` 之後到達的這類請求先排隊（`gate.queue.length` 看得到幾個），
+ * 直到 `releaseHeld()`（會先把 hold 關掉，之後的請求照常回應）。用來在「這一批一定還沒回來」的狀態下量畫面，不靠時間差。
+ * 排隊中的請求還沒記進 seen.paths / seen.pending（放行時才記）。
+ */
+export const gate = { hold: false, queue: [] };
+export function releaseHeld() {
+  gate.hold = false;
+  for (const run of gate.queue.splice(0)) run();
+}
+const MORE_RE = /\/commits\?(?:.*&)?sha=[0-9a-f]{40}(?:&|$)/;
 
 export function startMock() {
   return new Promise((ok) => {
     const server = createServer((req, res) => {
+      if (gate.hold && MORE_RE.test(req.url)) {
+        gate.queue.push(() => arrive(req, res));
+        return;
+      }
+      arrive(req, res);
+    });
+    function arrive(req, res) {
       // Record arrival, not delayed response time: cancelled old requests may finish later.
       const url = new URL(req.url, 'http://x');
       seen.paths.push(url.pathname + url.search);
@@ -97,7 +181,7 @@ export function startMock() {
         return;
       }
       handle(req, res);
-    });
+    }
     function handle(req, res) {
       const url = new URL(req.url, 'http://x');
       const base = `http://127.0.0.1:${server.address().port}`;
@@ -141,16 +225,19 @@ export function startMock() {
           },
         );
       }
-      const m = /^\/repos\/(?:demo|fork)\/adorable-git-graph(\/.*)?$/.exec(p);
-      if (!m) return json(404, { message: 'Not Found' });
-      const commitPath = /^\/commits\/(.+)$/.exec(m[1] ?? '');
+      const m = /^\/repos\/(demo|fork)\/([^/]+)(\/.*)?$/.exec(p);
+      const repo = m && (m[1] === 'demo' || m[2] === 'adorable-git-graph') && REPOS.get(m[2]);
+      if (!repo) return json(404, { message: 'Not Found' });
+      const rest = m[3];
+      const commitPath = /^\/commits\/(.+)$/.exec(rest ?? '');
       if (commitPath) {
         const ref = decodeURIComponent(commitPath[1]);
         const id =
-          HEADS[ref] ?? [...byId.keys()].find((id) => sha(id) === ref || sha(id).startsWith(ref));
+          (Object.hasOwn(repo.heads, ref) ? repo.heads[ref] : undefined) ??
+          [...repo.byId.keys()].find((id) => sha(id) === ref || sha(id).startsWith(ref));
         if (!id) return json(404, { message: 'Not Found' });
         return json(200, {
-          ...apiCommit(byId.get(id), base),
+          ...apiCommit(repo, repo.byId.get(id), base),
           files: [
             {
               filename: 'diagnostic.txt',
@@ -162,15 +249,17 @@ export function startMock() {
           ],
         });
       }
-      const comparePath = /^\/compare\/(.+)\.\.\.(.+)$/.exec(m[1] ?? '');
+      const comparePath = /^\/compare\/(.+)\.\.\.(.+)$/.exec(rest ?? '');
       if (comparePath) {
         const resolveId = (value) =>
-          [...byId.keys()].find((id) => sha(id) === decodeURIComponent(value).split(':').at(-1));
+          [...repo.byId.keys()].find(
+            (id) => sha(id) === decodeURIComponent(value).split(':').at(-1),
+          );
         const baseId = resolveId(comparePath[1]),
           headId = resolveId(comparePath[2]);
         if (!baseId || !headId) return json(404, { message: 'Not Found' });
-        const a = ancestors(baseId),
-          b = ancestors(headId),
+        const a = ancestors(repo, baseId),
+          b = ancestors(repo, headId),
           as = new Set(a.map((c) => c.id)),
           bs = new Set(b.map((c) => c.id));
         const common = b.find((c) => as.has(c.id));
@@ -181,7 +270,7 @@ export function startMock() {
           merge_base_commit: common ? { sha: sha(common.id) } : null,
           ahead_by: unique.length,
           behind_by: a.filter((c) => !bs.has(c.id)).length,
-          commits: unique.slice((page - 1) * 100, page * 100).map((c) => apiCommit(c, base)),
+          commits: unique.slice((page - 1) * 100, page * 100).map((c) => apiCommit(repo, c, base)),
           files:
             baseId === headId
               ? []
@@ -196,7 +285,7 @@ export function startMock() {
                 ],
         });
       }
-      if (m[1] === '/pulls/7')
+      if (rest === '/pulls/7' && repo.name === 'adorable-git-graph')
         return json(200, {
           number: 7,
           title: 'Diagnostic PR',
@@ -211,36 +300,45 @@ export function startMock() {
             repo: { full_name: 'fork/adorable-git-graph' },
           },
         });
-      switch (m[1]) {
+      switch (rest) {
         case undefined:
           return json(200, {
-            name: 'adorable-git-graph',
+            name: repo.name,
             default_branch: 'main',
-            html_url: 'https://github.com/demo/adorable-git-graph',
+            html_url: `https://github.com/demo/${repo.name}`,
             owner: { login: 'demo' },
           });
         case '/branches':
           return json(
             200,
-            Object.entries(HEADS).map(([name, id]) => ({ name, commit: { sha: sha(id) } })),
+            Object.entries(repo.heads).map(([name, id]) => ({ name, commit: { sha: sha(id) } })),
           );
         case '/pulls':
           return json(200, []);
         case '/tags':
-          return json(200, [
-            { name: 'v0.1.0', commit: { sha: sha('r2') } },
-            { name: 'v0.0.1', commit: { sha: sha('m3') } },
-          ]);
-        case '/commits': {
-          const ref = url.searchParams.get('sha');
-          const head = HEADS[ref] ?? SPECS.find((s) => sha(s[0]) === ref)?.[0];
-          if (!head) return json(404, { message: 'No commit found' });
-          const per = Number(url.searchParams.get('per_page') ?? 30);
           return json(
             200,
-            ancestors(head)
+            Object.entries(repo.tags).map(([name, id]) => ({ name, commit: { sha: sha(id) } })),
+          );
+        case '/commits': {
+          const ref = url.searchParams.get('sha') ?? '';
+          const isSha = /^[0-9a-f]{40}$/.test(ref);
+          if (isSha && faults.more > 0) {
+            faults.more--;
+            return json(502, { message: 'Bad Gateway (injected)' });
+          }
+          const head = isSha
+            ? repo.bySha.get(ref)
+            : Object.hasOwn(repo.heads, ref)
+              ? repo.heads[ref]
+              : undefined;
+          if (!head) return json(404, { message: `No commit found for SHA: ${ref}` });
+          const per = Math.min(Number(url.searchParams.get('per_page') ?? 30) || 30, 100);
+          return json(
+            200,
+            ancestors(repo, head)
               .slice(0, per)
-              .map((c) => apiCommit(c, base)),
+              .map((c) => apiCommit(repo, c, base)),
           );
         }
         default:

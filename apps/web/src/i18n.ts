@@ -45,6 +45,12 @@ const zh = {
   localOffline: '連不到 dev server，無法讀取這個本機 repository。',
   localFailed: '無法讀取本機的 git 歷史。',
   localOnly: '只有在執行 dev server 的這台電腦上，才能選擇與讀取其他本機 repository。',
+  /** 更早的歷史載入失敗的原因（viewer 會自己加上「更早的歷史載入失敗」的前綴，這裡不要句號） */
+  historyErrors: {
+    offline: 'dev server 沒有回應',
+    unknown: 'dev server 找不到這個 repository',
+    localOnly: '只有在執行 dev server 的這台電腦上才能讀取',
+  },
   snapshotErrors: {
     missing_dir: '找不到這個 repository 的資料夾（可能已移動或刪除）。',
     not_git: '這個資料夾不在 git repository 裡。',
@@ -101,6 +107,11 @@ const en: typeof zh = {
   localFailed: 'Could not read the local git history.',
   localOnly:
     'Other local repositories can only be chosen and read on the computer running the dev server.',
+  historyErrors: {
+    offline: 'the dev server did not respond',
+    unknown: 'the dev server does not know this repository',
+    localOnly: 'it can only be read on the computer running the dev server',
+  },
   snapshotErrors: {
     missing_dir:
       'The folder of this repository does not exist (it may have been moved or deleted).',
@@ -114,4 +125,5 @@ const en: typeof zh = {
 };
 
 export const locale: Locale = detectLocale();
-export const t = locale === 'zh-TW' ? zh : en;
+export const messagesFor = (l: Locale): typeof zh => (l === 'zh-TW' ? zh : en);
+export const t = messagesFor(locale);

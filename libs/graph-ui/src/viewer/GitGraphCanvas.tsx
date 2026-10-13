@@ -155,5 +155,6 @@ export function GitGraphCanvas({
     [],
   );
 
-  return <div ref={hostRef} className="agg-canvas" />;
+  // 純裝飾（列表的 DOM 列才是內容）：不要讓 canvas 出現在 listbox 的無障礙樹裡
+  return <div ref={hostRef} className="agg-canvas" aria-hidden="true" />;
 }

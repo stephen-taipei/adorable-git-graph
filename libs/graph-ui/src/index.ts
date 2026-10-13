@@ -2,6 +2,7 @@ export * from './scene/LogGraphScene';
 export * from './scene/geometry';
 export * from './viewer/GitGraphCanvas';
 export * from './viewer/GitGraphViewer';
+export * from './viewer/useStableLayout';
 export * from './viewer/ErrorBoundary';
 export * from './viewer/Mascot';
 export * from './themes/config';

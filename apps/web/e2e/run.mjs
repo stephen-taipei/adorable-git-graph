@@ -47,7 +47,16 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { findChrome } from '../../../tools/e2e/chrome-path.mjs';
-import { SPECS, seen, sha as mockSha, startMock } from '../../../tools/e2e/mock-github-api.mjs';
+import {
+  LONG,
+  SPECS,
+  faults,
+  gate,
+  releaseHeld,
+  seen,
+  sha as mockSha,
+  startMock,
+} from '../../../tools/e2e/mock-github-api.mjs';
 import { colorDistance, inkRatio, samplePixels } from '../../../tools/e2e/pixels.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -238,6 +247,48 @@ function startVite(args, env) {
 }
 
 /** 停掉 dev server 並等它真的結束（同一個埠馬上要再啟動一個）。 */
+function makeDeepRepo() {
+  const dir = realpathSync(mkdtempSync(resolve(tmpdir(), 'agg-web-e2e-deep-')));
+  git(dir, 'init', '-q', '-b', 'main');
+  const marks = new Map();
+  let at = Math.floor(Date.UTC(2025, 0, 1) / 1000);
+  let out = '';
+  const add = (ref, id, msg, parents) => {
+    marks.set(id, marks.size + 1);
+    at += 3600;
+    const name = ['Amy', 'Ben', 'Cat'][marks.size % 3];
+    const who = `${name} <${name.toLowerCase()}@example.test> ${at} +0000`;
+    out += `commit refs/heads/${ref}\nmark :${marks.get(id)}\nauthor ${who}\ncommitter ${who}\n`;
+    out += `data ${Buffer.byteLength(msg)}\n${msg}\n`;
+    if (parents[0]) out += `from :${marks.get(parents[0])}\n`;
+    for (const p of parents.slice(1)) out += `merge :${marks.get(p)}\n`;
+    out += '\n';
+  };
+  const main = (i) => {
+    const prev = i > 1 ? [`d${i - 1}`] : [];
+    if (i === 1) return add('main', 'd1', 'chore: the very first commit', prev);
+    if (i === 210) return add('main', 'd210', "Merge branch 'topic/old'", [...prev, 't3']);
+    add('main', `d${i}`, `${TYPES[i % TYPES.length]}: deep step ${i}`, prev);
+  };
+  for (let i = 1; i <= 700; i++) {
+    main(i);
+    if (i === 200) add('topic/old', 't1', 'feat: old topic one', ['d200']);
+    if (i === 205) {
+      add('topic/old', 't2', 'fix: old topic two', ['t1']);
+      add('topic/old', 't3', 'test: old topic three', ['t2']);
+    }
+    if (i === 650) {
+      add('wip/deep', 'w1', 'wip: deep side one', ['d650']);
+      add('wip/deep', 'w2', 'wip: deep side two', ['w1']);
+    }
+  }
+  out += `reset refs/tags/v0.1\nfrom :${marks.get('d30')}\n\n`;
+  out += `reset refs/tags/v1.0\nfrom :${marks.get('d690')}\n\n`;
+  execFileSync('git', ['fast-import', '--quiet'], { cwd: dir, env: gitEnv, input: out });
+  // fast-import 不碰工作目錄：全部的 commit 都是空的 tree，HEAD（main）乾乾淨淨
+  return dir; // 705 commits, 3 branches, 2 tags, 1 merge
+}
+
 async function stopVite(v) {
   if (!v || v.proc.exitCode !== null || v.proc.signalCode !== null) return;
   const exited = new Promise((ok) => v.proc.once('exit', ok));
@@ -421,6 +472,11 @@ let dev;
 let preview;
 let browser;
 let page;
+// infinite scroll 的步驟各自有 repo 與 dev server（會改動 repo、提高快照深度，不能影響上面的步驟）
+let deepDir;
+const sideServers = new Set();
+/** 失敗時要截圖的頁面（這些步驟用的是自己的頁面；沒有就截主畫面） */
+let shotPage;
 
 try {
   dev = startVite(['--port', String(port), '--strictPort'], env);
@@ -4807,14 +4863,678 @@ try {
     },
   );
 
+  // ═════════════════════════ infinite scroll / 詳情面板大小 ═════════════════════════
+  // 以下的步驟各自用自己的 dev server、暫時 repo 與 browser context（localStorage / sessionStorage 分開），
+  // 不改動上面步驟用的 repo、快照深度與設定。
+
+  const newContext = async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US' });
+    c.setDefaultTimeout(30_000 * SCALE);
+    c.setDefaultNavigationTimeout(30_000 * SCALE);
+    await c.route('https://github.com/**', (r) =>
+      r.fulfill({ status: 200, contentType: 'text/html', body: '<title>fake github</title>' }),
+    );
+    return c;
+  };
+  const xctx = await newContext();
+  /** 這一頁也是失敗時的截圖對象 */
+  const openPage = async (tag) => {
+    const pg = await xctx.newPage();
+    watchErrors(pg, tag);
+    shotPage = pg;
+    return pg;
+  };
+  // 前面步驟的主畫面用不到了：它的 WebGL 場景會一直跟下面的頁面搶 CPU（軟體 WebGL），先停在空白頁
+  await page.goto('about:blank');
+  // 側邊 dev server 的 repo 清單只掃描空資料夾（預設會掃描 repo 的上一層，也就是整個暫存目錄）
+  const emptyRoots = resolve(stateDir, 'empty-roots');
+  mkdirSync(emptyRoots);
+  /** 另起一個 dev server（`pnpm start` 同一份設定，只換環境變數）；結束時由 finally 收掉。 */
+  const startSide = async (name, extraEnv, args = []) => {
+    const p = await freePort();
+    const v = startVite([...args, '--port', String(p), '--strictPort'], {
+      ...env,
+      AGG_REPO_ROOTS: emptyRoots,
+      AGG_LOCAL_REPOS_FILE: stateFileOf(name),
+      ...extraEnv,
+    });
+    sideServers.add(v);
+    await v.ready;
+    return { v, port: p, origin: `http://localhost:${p}` };
+  };
+  const stopSide = async (v) => {
+    await stopVite(v);
+    sideServers.delete(v);
+  };
+
+  const rowShas = (pg) =>
+    pg.evaluate(() => [...document.querySelectorAll('.agg-commit')].map((r) => r.dataset.sha));
+  /** 列表最後一列（頁尾）：狀態、訊息（role=status 的 live region）、轉圈、按鈕。 */
+  const footerOf = (pg) =>
+    pg.evaluate(() => {
+      const f = document.querySelector('.agg-footer');
+      if (!f) return null;
+      const msg = f.querySelector('.agg-footer-msg');
+      return {
+        state: f.dataset.state ?? null,
+        text: msg?.textContent ?? '',
+        role: msg?.getAttribute('role') ?? null,
+        live: msg?.getAttribute('aria-live') ?? null,
+        spinner: Boolean(f.querySelector('.agg-spinner')),
+        button: f.querySelector('button')?.textContent ?? null,
+        height: f.getBoundingClientRect().height,
+      };
+    });
+  const waitFooter = async (pg, state, what) => {
+    await waitUntil(
+      async () => (await footerOf(pg))?.state === state,
+      30_000,
+      `${what}: footer data-state=${state}`,
+    );
+    return footerOf(pg);
+  };
+  /** 畫面最上面（完整看得到的第一列）是哪個 commit、離捲動區頂端多遠；用來證明「畫面沒有動」。 */
+  const viewAnchor = (pg) =>
+    pg.evaluate(() => {
+      const sc = document.querySelector('.agg-scroll');
+      const top = sc.getBoundingClientRect().top;
+      const row = [...document.querySelectorAll('.agg-commit')].find(
+        (r) => r.getBoundingClientRect().top >= top - 0.5,
+      );
+      return {
+        scrollTop: sc.scrollTop,
+        sha: row?.dataset.sha ?? null,
+        offset: row ? row.getBoundingClientRect().top - top : NaN,
+      };
+    });
+  /** 記下捲動容器的每一次 scrollTop（載入期間畫面若跳了一下又跳回來，只看前後兩點會漏掉） */
+  const recordScrolls = (pg) =>
+    pg.evaluate(() => {
+      const sc = document.querySelector('.agg-scroll');
+      window.__scrollStop?.();
+      window.__scrollLog = [];
+      const on = () => window.__scrollLog.push(sc.scrollTop);
+      sc.addEventListener('scroll', on);
+      window.__scrollStop = () => sc.removeEventListener('scroll', on);
+    });
+  const recordedScrolls = (pg) =>
+    pg.evaluate(() => {
+      window.__scrollStop?.();
+      window.__scrollStop = null;
+      return window.__scrollLog;
+    });
+  const commitChip = (pg) => pg.locator('.agg-chip--commits').first().innerText();
+  const tagScrollerOf = (pg) =>
+    pg.evaluate(() => {
+      document.querySelector('.agg-scroll').__tag = 'same-element';
+    });
+  const scrollerTagOf = (pg) =>
+    pg.evaluate(() => document.querySelector('.agg-scroll')?.__tag ?? null);
+  /** 欄位對齊（看得到的欄位）：標題列與第一列的同名欄位同 left / width。 */
+  const columnsAlignOn = async (pg, label) => {
+    const m = await pg.evaluate(() => {
+      const row = document.querySelector('.agg-commit');
+      const head = document.querySelector('.agg-colhead');
+      return ['agg-c-author', 'agg-c-date', 'agg-c-sha'].flatMap((c) => {
+        const a = row.querySelector(`.${c}`).getBoundingClientRect();
+        const b = head.querySelector(`.${c}`).getBoundingClientRect();
+        if (a.width === 0 && b.width === 0) return [];
+        return [{ c, dl: Math.abs(a.left - b.left), dw: Math.abs(a.width - b.width) }];
+      });
+    });
+    assert.ok(m.length >= 1, `${label}: no visible columns`);
+    for (const x of m)
+      assert.ok(
+        x.dl <= 1 && x.dw <= 1,
+        `${label}: column ${x.c} drifts from its header (Δleft ${x.dl}, Δwidth ${x.dw})`,
+      );
+  };
+
+  let deepOrigin;
+  let deepServer;
+  await step(
+    'INFINITE SCROLL (local; its own dev server on a 705-commit repo, AGG_MAX_COMMITS=100): nothing loads until you scroll; at the bottom the footer spins and the next 300 come from the dev server (?depth=400 → 700 → 1000), appended below without moving the view, losing the selection, recreating the scroller or replaying, the graph in sync — until "the first commit lives here"; a failed batch says so with Try again and never retries by itself; a live commit afterwards keeps the loaded history',
+    async () => {
+      deepDir = makeDeepRepo();
+      const all = gitLog(deepDir).map((c) => c.sha);
+      assert.equal(all.length, 705, 'sanity: the long repo');
+      const side = await startSide('deep', { AGG_REPO_DIR: deepDir, AGG_MAX_COMMITS: '100' });
+      deepOrigin = side.origin;
+      deepServer = side.v;
+      const pg = await openPage('deep page');
+      try {
+        // 這一頁向 dev server 要更深的快照（?depth=）的請求
+        const depths = [];
+        pg.on('request', (r) => {
+          const u = new URL(r.url());
+          if (u.pathname === '/__agg/git-snapshot' && u.searchParams.has('depth'))
+            depths.push(Number(u.searchParams.get('depth')));
+        });
+        // 攔住要更深快照的請求：在「這一批一定還沒回來」的狀態下量畫面（不靠時間差）；也可以讓下一批失敗（連線中斷）
+        let hold = false;
+        let failNext = false;
+        const held = [];
+        await pg.route(
+          (u) => u.pathname === '/__agg/git-snapshot' && u.searchParams.has('depth'),
+          async (route) => {
+            if (failNext) {
+              failNext = false;
+              return route.abort('failed');
+            }
+            if (hold) await new Promise((ok) => held.push(ok));
+            await route.continue().catch(() => {});
+          },
+        );
+        const release = () => {
+          hold = false;
+          for (const ok of held.splice(0)) ok();
+        };
+
+        await pg.goto(side.origin);
+        await titleIs(dirBase(deepDir), pg);
+        await waitUntil(async () => (await rowShas(pg)).length === 100, 25_000, 'the first 100');
+        assert.deepEqual(await rowShas(pg), all.slice(0, 100), 'the newest 100, newest first');
+        assert.match(await commitChip(pg), /^100 commits$/);
+        await replayDone(pg);
+        let f = await footerOf(pg);
+        assert.equal(f.state, 'idle', 'more history exists: the footer waits for the scroll');
+        assert.equal(f.button, 'Load older history', 'a keyboard / manual fallback');
+        assert.equal(f.role, 'status');
+        await sleep(1000);
+        assert.deepEqual(depths, [], 'nothing more is loaded before scrolling down');
+        const v01 = git(deepDir, 'rev-parse', 'v0.1');
+        assert.ok(!(await rowShas(pg)).includes(v01), 'sanity: the old tag is not loaded yet');
+
+        // 選一列（詳情面板打開）；之後每一批都不能把選取弄丟、不能重播、不能換掉捲動容器
+        const picked = all[5];
+        await clickRow(picked, {}, pg);
+        await waitSelected(picked, 'deep: select a row', pg);
+        await settleScroll(pg);
+        await watchReplay(pg);
+        await tagScrollerOf(pg);
+
+        /** 觸發下一批（預設：捲到底）→ 頁尾轉圈（請求被攔住）→ 量畫面 → 放行 → 列數變成 `want`，畫面沒有動 */
+        const batch = async (want, label, trigger) => {
+          hold = true;
+          if (trigger) await trigger();
+          else await scrollTo(await scrollMax(pg), pg);
+          await waitUntil(
+            () => held.length > 0,
+            20_000,
+            `${label}: the request for the next batch`,
+          );
+          f = await footerOf(pg);
+          assert.equal(f.state, 'loading', `${label}: the footer while loading`);
+          assert.equal(f.text, 'Loading older history…', `${label}: the loading text`);
+          assert.ok(f.spinner, `${label}: a spinner`);
+          assert.deepEqual([f.role, f.live], ['status', 'polite'], `${label}: announced politely`);
+          await settleScroll(pg);
+          const before = await viewAnchor(pg);
+          await recordScrolls(pg);
+          release();
+          await waitUntil(
+            async () => (await rowShas(pg)).length === want,
+            30_000,
+            `${label}: ${want} rows`,
+          );
+          await waitUntil(
+            async () => (await footerOf(pg)).state !== 'loading',
+            10_000,
+            `${label}: loaded`,
+          );
+          await sleep(300);
+          const after = await viewAnchor(pg);
+          const jumps = (await recordedScrolls(pg)).filter(
+            (t) => Math.abs(t - before.scrollTop) > 1,
+          );
+          assert.deepEqual(jumps, [], `${label}: scrollTop never moved while the batch came in`);
+          assert.equal(after.sha, before.sha, `${label}: the commit at the top of the view`);
+          assert.ok(
+            Math.abs(after.offset - before.offset) <= 1 &&
+              Math.abs(after.scrollTop - before.scrollTop) <= 1,
+            `${label}: the view must not move (offset ${before.offset} → ${after.offset}, scrollTop ${before.scrollTop} → ${after.scrollTop})`,
+          );
+          assert.deepEqual(
+            await rowShas(pg),
+            all.slice(0, want),
+            `${label}: older commits are appended below, in git order`,
+          );
+          assert.deepEqual(await replayLog(pg), ['done'], `${label}: the scene does not replay`);
+          assert.equal(await scrollerTagOf(pg), 'same-element', `${label}: same scroller`);
+          assert.equal(await selectedSha(pg), picked, `${label}: the selection survives`);
+          assert.equal(await pg.locator('.agg-detail').count(), 1, `${label}: detail still open`);
+          assert.match(await commitChip(pg), new RegExp(`^${want} commits$`));
+        };
+
+        // ── 第 1 批：捲到底 → 100 → 400 ──
+        await batch(400, 'batch 1');
+        f = await footerOf(pg);
+        assert.equal(f.state, 'idle');
+        assert.equal(f.text, 'Loaded 300 older commits', 'the footer says what came in');
+        // 接縫（第 100 列附近）與新的一批中間：線圖跟列表對齊
+        await graphSync('deep: around the seam of batch 1', { pg });
+        await pg.screenshot({ path: resolve(artifacts, '14-deep-batch1.png') });
+        const rowH = Number(await pg.locator('.agg-canvas').getAttribute('data-row-h'));
+        await scrollTo(Math.round(250 * rowH), pg);
+        await graphSync('deep: the middle of batch 1', { pg });
+
+        // ── 第 2 批：連線失敗 → 錯誤 + 再試一次（不會自己重試）→ 再試一次 → 700 ──
+        failNext = true;
+        await scrollTo(await scrollMax(pg), pg);
+        f = await waitFooter(pg, 'error', 'a failed batch');
+        assert.equal(
+          f.text,
+          'Could not load older history · the dev server did not respond',
+          'the viewer adds the prefix once; the web app only gives the reason',
+        );
+        assert.equal(f.button, 'Try again');
+        assert.equal(f.role, 'status', 'the failure is announced');
+        assert.equal(f.spinner, false);
+        const tries = depths.length;
+        assert.deepEqual(depths, [400, 700], 'the failed request asked for 700');
+        await sleep(1500);
+        await scrollTo((await scrollMax(pg)) - 3000, pg);
+        await scrollTo(await scrollMax(pg), pg);
+        await sleep(1500);
+        assert.equal(depths.length, tries, 'no automatic retry (not even when scrolling again)');
+        assert.equal((await rowShas(pg)).length, 400, 'a failed batch changes nothing');
+        assert.equal((await footerOf(pg)).state, 'error', 'the error stays until Try again');
+        // Try again 用鍵盤（Enter）：按鈕在載入中消失，焦點回到列表（不會掉到 body）
+        const retry = pg.locator('.agg-footer').getByRole('button', { name: 'Try again' });
+        await batch(700, 'batch 2 (Try again)', async () => {
+          await retry.focus();
+          await pg.keyboard.press('Enter');
+        });
+        await waitUntil(
+          () =>
+            pg.evaluate(() => document.activeElement?.classList.contains('agg-scroll') ?? false),
+          5000,
+          'keyboard focus back on the list after Try again',
+        );
+        await graphSync('deep: around the seam of batch 2', { pg });
+
+        // ── 第 3 批：剩下的 5 個 → 歷史的起點 ──
+        await batch(705, 'batch 3');
+        f = await footerOf(pg);
+        assert.equal(f.state, 'end');
+        assert.equal(f.text, 'the first commit lives here', 'the root commit is loaded');
+        assert.equal(f.button, null, 'nothing left to load');
+        assert.equal(f.spinner, false);
+        assert.deepEqual(await rowShas(pg), all, 'every commit, in git order');
+        const oldTag = (await domRows(pg)).find((r) => r.sha === v01);
+        assert.ok(
+          oldTag?.refs.some((r) => r.name === 'v0.1' && /agg-ref--tag/.test(r.cls)),
+          'the old tag shows up once its commit is loaded',
+        );
+        assert.deepEqual(depths, [400, 700, 700, 1000], 'one request per batch (+ the retry)');
+        await sleep(1500);
+        assert.equal(depths.length, 4, 'no more requests at the start of history');
+        await scrollTo(await scrollMax(pg), pg);
+        await graphSync('deep: the very first commit', { pg });
+        await pg.screenshot({ path: resolve(artifacts, '14-deep-end.png') });
+
+        // ── 載完之後來一個新 commit：即時更新帶著同樣的深度（不會縮回第一批的 100 個）──
+        commit(deepDir, 'feat: live after paging');
+        const fresh = git(deepDir, 'rev-parse', 'HEAD');
+        await waitUntil(
+          async () => (await rowShas(pg))[0] === fresh,
+          20_000,
+          'the live commit on top',
+        );
+        assert.equal((await rowShas(pg)).length, 706, 'the loaded history is kept');
+        assert.equal((await footerOf(pg)).state, 'end');
+        assert.equal(await selectedSha(pg), picked, 'the selection survives the live update');
+      } finally {
+        await pg.close();
+      }
+    },
+  );
+
+  await step(
+    'DETAIL SIZE: a toggle next to prev / next / close widens the docked panel to clamp(380px, 50%, 720px) and back (aria-pressed; the label / title stay “Wide details panel”); the list and graph re-lay out (no horizontal overflow, aligned columns, selected row visible, no replay); Esc still closes the panel in one step; the choice is remembered across reloads; medium widens the drawer, the narrow bottom sheet has no toggle',
+    async () => {
+      const pg = await openPage('detail size page');
+      try {
+        await pg.goto(deepOrigin);
+        await titleIs(dirBase(deepDir), pg);
+        await pg.locator('.agg-commit').first().waitFor();
+        await replayDone(pg);
+        const shas = await rowShas(pg);
+        const panel = () =>
+          pg.evaluate(() => {
+            const root = document.querySelector('.agg-root');
+            const d = document.querySelector('.agg-detail');
+            const b = d?.querySelector('.agg-detail-size');
+            const r = d?.getBoundingClientRect();
+            const m = document.querySelector('.agg-main').getBoundingClientRect();
+            return {
+              size: root.dataset.size,
+              detailSize: root.dataset.detailSize,
+              cssW: root.style.getPropertyValue('--agg-detail-w'),
+              rootW: root.getBoundingClientRect().width,
+              open: Boolean(d),
+              position: d ? getComputedStyle(d).position : null,
+              left: r?.left ?? NaN,
+              right: r?.right ?? NaN,
+              width: r?.width ?? NaN,
+              mainRight: m.right,
+              nav: d
+                ? [...d.querySelectorAll('.agg-detail-nav button')].map((x) =>
+                    x.getAttribute('aria-label'),
+                  )
+                : [],
+              button: b
+                ? {
+                    pressed: b.getAttribute('aria-pressed'),
+                    label: b.getAttribute('aria-label'),
+                    title: b.title,
+                  }
+                : null,
+              stored: localStorage.getItem('agg.detail-size'),
+            };
+          });
+        const wideW = (rootW) => Math.round(Math.min(720, Math.max(380, rootW * 0.5)));
+        const toggle = () => pg.locator('.agg-detail .agg-detail-size');
+        const sizeTo = async (w, h, size) => {
+          await pg.setViewportSize({ width: w, height: h });
+          await pg.locator(`.agg-root[data-size="${size}"]`).waitFor();
+          await settleScroll(pg);
+        };
+        const select = async (sha) => {
+          await clickRow(sha, {}, pg);
+          await waitSelected(sha, 'detail size: select', pg);
+          await pg.locator('.agg-detail').waitFor();
+          await sleep(250);
+        };
+
+        // ── wide（1440）：預設 normal = 380px，按鈕在 上一個 / 下一個 與 關閉 之間 ──
+        await select(shas[4]);
+        let s = await panel();
+        assert.deepEqual(s.nav, [
+          'Previous (newer)',
+          'Next (older)',
+          'Wide details panel',
+          'Close details',
+        ]);
+        assert.deepEqual(s.button, {
+          pressed: 'false',
+          label: 'Wide details panel',
+          title: 'Wide details panel',
+        });
+        assert.equal(s.size, 'wide');
+        assert.equal(s.detailSize, 'normal');
+        assert.equal(s.cssW, '380px');
+        assert.ok(Math.abs(s.width - 380) <= 1, `normal docked width ${s.width}`);
+        assert.ok(s.mainRight <= s.left + 0.5, 'list and panel side by side');
+        assert.equal(s.stored, null, 'nothing stored until the user picks a size');
+        assert.deepEqual(await noOverflow(pg), []);
+        const normalList = (await rectOf('.agg-main', pg)).width;
+
+        // ── 加寬：clamp(380, 50%, 720)；列表與線圖重新排版，不重播 ──
+        await watchReplay(pg);
+        await toggle().click();
+        await waitUntil(
+          async () => (await panel()).detailSize === 'wide',
+          5000,
+          'data-detail-size=wide',
+        );
+        await sleep(300);
+        s = await panel();
+        const want = wideW(s.rootW);
+        assert.ok(want > 380, `sanity: the wide width (${want}) is wider at 1440px`);
+        assert.deepEqual(s.button, {
+          pressed: 'true',
+          label: 'Wide details panel',
+          title: 'Wide details panel',
+        });
+        assert.equal(s.cssW, `${want}px`, '--agg-detail-w');
+        assert.ok(Math.abs(s.width - want) <= 1, `wide docked width ${s.width} ≠ ${want}`);
+        assert.ok(s.mainRight <= s.left + 0.5, 'still side by side, no overlap');
+        assert.ok(
+          (await rectOf('.agg-main', pg)).width < normalList - (want - 380) + 2,
+          'the list gave the room to the panel',
+        );
+        assert.equal(s.stored, 'wide', 'remembered in this browser');
+        assert.deepEqual(await noOverflow(pg), [], 'wide panel: no horizontal overflow');
+        await columnsAlignOn(pg, 'wide panel');
+        await waitRowVisible(shas[4], 'the selected row next to the wide panel', pg);
+        await graphSync('wide detail panel', { pg });
+        assert.deepEqual(await replayLog(pg), ['done'], 'resizing the panel does not replay');
+        await pg.screenshot({ path: resolve(artifacts, '15-detail-wide.png') });
+
+        // Esc 一次就關掉面板（焦點在剛按的按鈕上）
+        assert.equal(
+          await pg.evaluate(() => document.activeElement?.classList.contains('agg-detail-size')),
+          true,
+        );
+        await pg.keyboard.press('Escape');
+        await waitUntil(async () => (await selectedSha(pg)) === null, 5000, 'Esc closes the panel');
+        assert.equal(await pg.locator('.agg-detail').count(), 0);
+        assert.deepEqual(await noOverflow(pg), []);
+
+        // ── 重新載入：還是 wide ──
+        await pg.reload();
+        await titleIs(dirBase(deepDir), pg);
+        await pg.locator('.agg-commit').first().waitFor();
+        await select(shas[2]);
+        s = await panel();
+        assert.equal(s.detailSize, 'wide', 'the size survives a reload');
+        assert.equal(s.button.pressed, 'true');
+        assert.ok(Math.abs(s.width - wideW(s.rootW)) <= 1, `wide after reload (${s.width})`);
+        assert.deepEqual(await noOverflow(pg), []);
+
+        // ── medium（820）：浮動抽屜跟著變寬，列表版面不變 ──
+        await sizeTo(820, 900, 'medium');
+        s = await panel();
+        assert.equal(s.position, 'absolute', 'medium: a drawer');
+        assert.ok(s.button, 'medium: the toggle is there (it widens the drawer)');
+        assert.ok(s.width > 400.5, `medium + wide: a wider drawer (${s.width})`);
+        assert.ok(s.left >= 0 && s.right <= 820 + 0.5, `drawer on screen ${s.left}–${s.right}`);
+        assert.deepEqual(await noOverflow(pg), []);
+        const listMid = (await rectOf('.agg-main', pg)).width;
+        await toggle().click();
+        await waitUntil(async () => (await panel()).detailSize === 'normal', 5000, 'medium normal');
+        await sleep(200);
+        s = await panel();
+        assert.ok(s.width <= 400.5, `medium + normal: the usual drawer (${s.width})`);
+        assert.equal(s.button.pressed, 'false');
+        assert.equal(
+          (await rectOf('.agg-main', pg)).width,
+          listMid,
+          'the drawer floats: the list keeps its layout',
+        );
+        await toggle().click();
+        await waitUntil(async () => (await panel()).detailSize === 'wide', 5000, 'medium wide');
+        await graphSync('medium + wide drawer', { pg, minRows: 4 });
+
+        // ── narrow（390）：底部面板本來就是全寬，沒有切換按鈕 ──
+        await sizeTo(390, 844, 'narrow');
+        s = await panel();
+        assert.equal(s.button, null, 'narrow: no size toggle on the bottom sheet');
+        assert.deepEqual(s.nav, ['Previous (newer)', 'Next (older)', 'Close details']);
+        assert.ok(s.left >= 0 && s.right <= 390.5, `the sheet fits (${s.left}–${s.right})`);
+        assert.deepEqual(await noOverflow(pg), [], 'narrow + wide setting: no overflow');
+        await pg.screenshot({ path: resolve(artifacts, '15-detail-narrow.png') });
+
+        // ── 回到 wide：還原成 normal（也記住）──
+        await sizeTo(1440, 900, 'wide');
+        s = await panel();
+        assert.equal(s.detailSize, 'wide');
+        await toggle().click();
+        await waitUntil(
+          async () => (await panel()).detailSize === 'normal',
+          5000,
+          'back to normal',
+        );
+        await sleep(300);
+        s = await panel();
+        assert.ok(Math.abs(s.width - 380) <= 1, `normal again (${s.width})`);
+        assert.equal(s.cssW, '380px');
+        assert.equal(s.stored, 'normal');
+        assert.deepEqual(await noOverflow(pg), []);
+        await columnsAlignOn(pg, 'normal panel again');
+        await graphSync('normal detail panel again', { pg });
+      } finally {
+        await pg.close();
+      }
+      await stopSide(deepServer);
+    },
+  );
+
+  await step(
+    'INFINITE SCROLL (GitHub source, mock API): demo/long-history shows one page per branch; scrolling to the bottom fetches /commits?sha=<missing parent> and appends the older commits without moving the view or replaying, the graph in sync; a failed request says so with Try again (no automatic retry); it ends at the first commit with every commit newest first and the old tag on its commit',
+    async () => {
+      // 與 graph-core 相同的取法：每條 branch 從 tip 往回一頁（60 筆，時間倒序）；缺的 parent 再往回抓一頁
+      const byId = new Map(
+        LONG.specs.map(([id, parents, , , hours]) => [id, { id, parents, hours }]),
+      );
+      const back = (id) => {
+        const seenIds = new Set();
+        const stack = [id];
+        while (stack.length) {
+          const cur = stack.pop();
+          if (seenIds.has(cur)) continue;
+          seenIds.add(cur);
+          stack.push(...byId.get(cur).parents);
+        }
+        return [...seenIds].sort((a, b) => byId.get(b).hours - byId.get(a).hours);
+      };
+      const first = new Set(Object.values(LONG.heads).flatMap((h) => back(h).slice(0, 60)));
+      const missing = (have) => [
+        ...new Set([...have].flatMap((id) => byId.get(id).parents).filter((p) => !have.has(p))),
+      ];
+      assert.deepEqual(missing(first), ['L88'], 'sanity: the first batch stops at L88');
+      const second = new Set([...first, ...back('L88').slice(0, 60)]);
+      assert.deepEqual(missing(second), ['L31'], 'sanity: the second batch stops at L31');
+      const shaToId = new Map(LONG.specs.map(([id]) => [mockSha(id), id]));
+      const moreCalls = () =>
+        seen.paths.filter((p) => /^\/repos\/demo\/long-history\/commits\?sha=[0-9a-f]{40}/.test(p));
+      const idsOnScreen = async (pg) => (await rowShas(pg)).map((s) => shaToId.get(s));
+      const newestFirst = async (pg) => {
+        const t = (await domRows(pg)).map((r) => Date.parse(r.datetime));
+        return t.every((x, i) => i === 0 || t[i - 1] >= x);
+      };
+
+      const pg = await openPage('GitHub paging page');
+      try {
+        await pg.goto(`${base}/?repo=demo/long-history`);
+        await titleIs('demo/long-history', pg);
+        await waitUntil(
+          async () => (await rowShas(pg)).length === first.size,
+          25_000,
+          `the first batch (${first.size})`,
+        );
+        assert.ok(sameSet(await idsOnScreen(pg), [...first]), 'one page per branch');
+        assert.ok(await newestFirst(pg), 'newest first');
+        await replayDone(pg);
+        let f = await footerOf(pg);
+        assert.equal(f.state, 'idle', 'GitHub: older history exists');
+        await sleep(800);
+        assert.deepEqual(moreCalls(), [], 'nothing more is fetched before scrolling');
+        await watchReplay(pg);
+        await tagScrollerOf(pg);
+
+        // ── 第 1 批：mock 先攔住 sha= 的請求（這一批一定還沒回來時量畫面）──
+        gate.hold = true;
+        await scrollTo(await scrollMax(pg), pg);
+        await waitUntil(() => gate.queue.length > 0, 20_000, 'the request from the missing parent');
+        f = await footerOf(pg);
+        assert.equal(f.state, 'loading');
+        assert.equal(f.text, 'Loading older history…');
+        await settleScroll(pg);
+        const before = await viewAnchor(pg);
+        await recordScrolls(pg);
+        releaseHeld();
+        await waitUntil(
+          async () => (await rowShas(pg)).length === second.size,
+          30_000,
+          `the second batch (${second.size})`,
+        );
+        await waitUntil(async () => (await footerOf(pg)).state === 'idle', 10_000, 'idle again');
+        await sleep(300);
+        const after = await viewAnchor(pg);
+        const jumps = (await recordedScrolls(pg)).filter((t) => Math.abs(t - before.scrollTop) > 1);
+        assert.deepEqual(jumps, [], 'GitHub: scrollTop never moved while the batch came in');
+        assert.equal(after.sha, before.sha, 'GitHub: the commit at the top of the view');
+        assert.ok(
+          Math.abs(after.offset - before.offset) <= 1 &&
+            Math.abs(after.scrollTop - before.scrollTop) <= 1,
+          `GitHub: the view must not move (${JSON.stringify({ before, after })})`,
+        );
+        assert.deepEqual(
+          moreCalls(),
+          [`/repos/demo/long-history/commits?sha=${mockSha('L88')}&per_page=60`],
+          'one page back from the only missing parent',
+        );
+        assert.ok(sameSet(await idsOnScreen(pg), [...second]));
+        assert.ok(await newestFirst(pg), 'still newest first');
+        assert.deepEqual(await replayLog(pg), ['done'], 'GitHub: no replay');
+        assert.equal(await scrollerTagOf(pg), 'same-element');
+        await graphSync('GitHub: around the seam', { pg });
+
+        // ── 第 2 批：502 → 錯誤 + 再試一次（不會自己重試）→ 再試一次 → 全部 ──
+        faults.more = 1;
+        await scrollTo(await scrollMax(pg), pg);
+        f = await waitFooter(pg, 'error', 'GitHub: a failed batch');
+        assert.equal(f.text, 'Could not load older history · Unknown error.');
+        assert.equal(f.button, 'Try again');
+        const calls = moreCalls().length;
+        await sleep(1500);
+        await scrollTo((await scrollMax(pg)) - 1500, pg);
+        await scrollTo(await scrollMax(pg), pg);
+        await sleep(1500);
+        assert.equal(moreCalls().length, calls, 'GitHub: no automatic retry');
+        assert.equal((await rowShas(pg)).length, second.size, 'a failed batch changes nothing');
+        await pg.locator('.agg-footer').getByRole('button', { name: 'Try again' }).click();
+        await waitFooter(pg, 'end', 'GitHub: the start of history');
+        f = await footerOf(pg);
+        assert.equal(f.text, 'the first commit lives here');
+        assert.equal(f.button, null);
+        assert.equal((await rowShas(pg)).length, LONG.total, 'every commit of demo/long-history');
+        assert.ok(
+          sameSet(
+            await idsOnScreen(pg),
+            LONG.specs.map(([id]) => id),
+          ),
+        );
+        assert.ok(await newestFirst(pg), 'newest first to the end');
+        assert.deepEqual(
+          moreCalls().slice(-2),
+          Array(2).fill(`/repos/demo/long-history/commits?sha=${mockSha('L31')}&per_page=60`),
+          'the failed request and Try again both start from L31',
+        );
+        const l40 = (await domRows(pg)).find((r) => r.sha === mockSha('L40'));
+        assert.ok(
+          l40?.refs.some((r) => r.name === 'v1.0' && /agg-ref--tag/.test(r.cls)),
+          'tag v1.0 appears on its (old) commit',
+        );
+        assert.deepEqual(await replayLog(pg), ['done'], 'GitHub: no replay after Try again');
+        const total = moreCalls().length;
+        await sleep(1500);
+        assert.equal(moreCalls().length, total, 'nothing more to fetch');
+        await scrollTo(await scrollMax(pg), pg);
+        await graphSync('GitHub: the first commit', { pg });
+      } finally {
+        gate.hold = false;
+        faults.more = 0;
+        releaseHeld();
+        await pg.close();
+      }
+    },
+  );
+
   assert.deepEqual(errors, [], `unexpected browser errors:\n${errors.join('\n')}`);
   console.log(`\nAll ${results.length} web e2e steps passed. Screenshots → ${artifacts}`);
 } catch (err) {
   console.error('\n✘ web e2e failed:', err);
   if (errors.length) console.error('browser errors:\n' + errors.join('\n'));
   try {
-    await page?.screenshot({ path: resolve(artifacts, 'failure.png') });
-    console.error(`failure screenshot → ${resolve(artifacts, 'failure.png')}`);
+    // 診斷截圖：e2e/.artifacts/diagnostics/（這些步驟失敗時截它們自己的頁面）
+    const diagnostics = resolve(artifacts, 'diagnostics');
+    mkdirSync(diagnostics, { recursive: true });
+    const shot = shotPage && !shotPage.isClosed() ? shotPage : page;
+    await shot?.screenshot({ path: resolve(diagnostics, 'failure.png') });
+    console.error(`failure screenshot → ${resolve(diagnostics, 'failure.png')}`);
   } catch {
     /* ignore */
   }
@@ -4824,7 +5544,9 @@ try {
   await browser?.close();
   dev?.proc.kill();
   preview?.proc.kill();
+  for (const v of sideServers) v.proc.kill();
   mock.close();
+  if (deepDir) rmSync(deepDir, { recursive: true, force: true });
   rmSync(repoDir, { recursive: true, force: true });
   rmSync(fx.rootsDir, { recursive: true, force: true });
   rmSync(fx.outsideDir, { recursive: true, force: true });

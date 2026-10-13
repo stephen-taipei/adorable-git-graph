@@ -466,6 +466,37 @@ describe('background credential scope and fork diagnostics', () => {
     });
     expect(mocks.diagnostics.mock.calls.at(-1)![2].token).toBe('fixture-new-token');
   });
+  it('refuses to page older history for a graph fetched with a previous token', async () => {
+    const store: Data = { settings: { token: 'fixture-old-token' } };
+    const h = await harness(store);
+    mocks.fetch.mockResolvedValue(graph('r'));
+    const requests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push(new Headers(init?.headers).get('Authorization') ?? '');
+        return new Response(JSON.stringify([]), { status: 200 });
+      }),
+    );
+    const first = await h.call({ type: 'fetch-graph', owner: 'o', repo: 'r' });
+    const more = (generation: unknown) =>
+      h.call({ type: 'fetch-more', owner: 'o', repo: 'r', shas: ['a'.repeat(40)], generation });
+    expect(await more(first.data.diagnosticGeneration)).toMatchObject({
+      ok: true,
+      data: { commits: [] },
+    });
+    expect(requests).toEqual(['Bearer fixture-old-token']);
+    store.settings = { token: 'fixture-new-token' };
+    expect(await more(first.data.diagnosticGeneration)).toMatchObject({
+      ok: false,
+      error: { code: 'source_changed' },
+    });
+    expect(await more(undefined)).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    expect(requests).toEqual(['Bearer fixture-old-token']);
+    const next = await h.call({ type: 'fetch-graph', owner: 'o', repo: 'r' });
+    expect((await more(next.data.diagnosticGeneration)).ok).toBe(true);
+    expect(requests.at(-1)).toBe('Bearer fixture-new-token');
+  });
   it('waits for delayed invalidation and never returns an old-token private graph', async () => {
     const old = graph('old-private'),
       fresh = graph('new-public'),

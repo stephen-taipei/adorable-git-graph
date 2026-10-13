@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_THEME, GitGraphViewer, THEME_IDS, isThemeId } from '@adorable/graph-ui';
-import type { ThemeId } from '@adorable/graph-ui';
+import type { DetailSize, ThemeId } from '@adorable/graph-ui';
 import { SourceBar, isThemeSetting } from './SourceBar';
 import { TokenDialog } from './TokenDialog';
 import { searchFromSource, sourceFromSearch } from './source';
@@ -20,6 +20,8 @@ import {
   saveCredential,
   syncAuth,
 } from './authScope';
+
+const isDetailSize = (v: string): v is DetailSize => v === 'normal' || v === 'wide';
 
 const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈' };
 const THEME_ID_LABEL: Record<ThemeId, string> = {
@@ -118,7 +120,16 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
-  const { state, refresh, repoName, diagnostics } = useGraphSource(source, token);
+  // 詳情面板的大小（面板右上角的按鈕）：記在這個瀏覽器，下次打開還是同一個大小
+  const [detailSize, setDetailSize] = useStored<DetailSize>(
+    'agg.detail-size',
+    'normal',
+    isDetailSize,
+  );
+  const { state, refresh, repoName, diagnostics, loadMore, history } = useGraphSource(
+    source,
+    token,
+  );
   const sourceKey =
     source.kind === 'github'
       ? `github:${source.owner}/${source.repo}`
@@ -162,6 +173,10 @@ export function App() {
         sourceKey={sourceKey}
         viewerStateKey={viewerStateKey}
         onRefresh={refresh}
+        onLoadMore={loadMore}
+        history={history}
+        detailSize={detailSize}
+        onDetailSizeChange={setDetailSize}
         onOpenSettings={() => {
           setTokenError(null);
           setTokenOpen(true);
