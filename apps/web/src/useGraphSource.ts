@@ -13,10 +13,12 @@ import { createLocalAdapter } from './diagnostics';
 import type { GraphData } from '@adorable/graph-core';
 import { useStableLayout } from '@adorable/graph-ui';
 import type { HistoryState, ViewerState } from '@adorable/graph-ui';
-import { DEFAULT_REPO, HMR_EVENT, isRepoId, snapshotKey } from './protocol';
+import { DEFAULT_REPO, isRepoId, snapshotKey } from './protocol';
 import type { GitSnapshot, SnapshotEvent } from './protocol';
 import type { Source } from './source';
 import { LOCAL_ONLY, fetchLocalSnapshot } from './localRepos';
+import { subscribeSnapshots } from './live';
+import { HAS_SERVER } from './runtime';
 import { hasMore, localHistoryError, nextDepth, settled } from './history';
 import type { PagingState } from './history';
 import { t } from './i18n';
@@ -35,9 +37,12 @@ type Missing = 'unknown' | 'offline' | typeof LOCAL_ONLY;
  */
 /** `selection`：每次導覽（含再選一次同一個 repo）都是新的物件，用來在同一個 id 上也重抓一次。 */
 function useLocalSnapshot(id: string, selection: unknown) {
-  const [snaps, setSnaps] = useState<Record<string, GitSnapshot>>(() => ({
-    [DEFAULT_REPO]: snapshot,
-  }));
+  // npm CLI 的建置沒有烤進去的快照：預設 repo 一開始也向 server 要（見下方）
+  const [snaps, setSnaps] = useState<Record<string, GitSnapshot>>(() => {
+    const initial: Record<string, GitSnapshot> = {};
+    if (snapshot) initial[DEFAULT_REPO] = snapshot;
+    return initial;
+  });
   /** 'unknown'：dev server 不認得這個 id；'offline'：連不上；LOCAL_ONLY：不是從這台電腦開的畫面 */
   const [missing, setMissing] = useState<Record<string, Missing>>({});
   /** 更早的歷史（infinite scroll）的載入狀態，每個 repo 各自記 */
@@ -121,8 +126,6 @@ function useLocalSnapshot(id: string, selection: unknown) {
   );
 
   useEffect(() => {
-    const hot = import.meta.hot;
-    if (!hot) return;
     const onEvent = (e: SnapshotEvent | undefined) => {
       if (!e || typeof e.repo !== 'string' || !isRepoId(e.repo)) return;
       // 預設 repo 直接帶著快照；其他 repo 只通知有變，正在看的才去拿（其他的切回來時本來就會重抓）
@@ -132,14 +135,18 @@ function useLocalSnapshot(id: string, selection: unknown) {
         else accept(e.repo, e.snapshot);
       } else if (e.repo === current.current && e.repo !== DEFAULT_REPO) void load(e.repo);
     };
-    hot.on(HMR_EVENT, onEvent);
-    return () => hot.off(HMR_EVENT, onEvent);
+    return subscribeSnapshots(onEvent);
   }, [accept, load, tooShallow]);
+
+  // 沒有烤進 bundle 的預設快照（npm CLI）：啟動時向 server 要一次，之後的更新由 SSE 推送
+  useEffect(() => {
+    if (HAS_SERVER && !snapshot) void load(DEFAULT_REPO);
+  }, [load]);
 
   // 非預設 repo：每次選到（包含切回來）都向 dev server 要最新快照——它也會因此（重新）開始監看這個 repo。
   // 顯示期間每 2 分鐘、以及分頁回到前景時再抓一次：dev server 會停掉 10 分鐘沒人要的 repo，這也是漏掉通知時的安全網。
   useEffect(() => {
-    if (!import.meta.env.DEV || id === DEFAULT_REPO) return;
+    if (!HAS_SERVER || id === DEFAULT_REPO) return;
     forget(id);
     void load(id);
     const again = () => {
@@ -364,7 +371,7 @@ export interface GraphSource {
 export function useGraphSource(source: Source, token: string): GraphSource {
   // 靜態建置只有預設 repo 的快照（沒有 dev server 可以問）
   const localId =
-    import.meta.env.DEV && source.kind === 'local' ? (source.id ?? DEFAULT_REPO) : DEFAULT_REPO;
+    HAS_SERVER && source.kind === 'local' ? (source.id ?? DEFAULT_REPO) : DEFAULT_REPO;
   const local = useLocalSnapshot(localId, source);
   const gh = useGitHubGraph(source, token);
   const diagnostics = useMemo(
@@ -377,7 +384,7 @@ export function useGraphSource(source: Source, token: string): GraphSource {
             }),
             context: { commit: source.commit, pullRequest: source.pullRequest },
           })
-        : import.meta.env.DEV
+        : HAS_SERVER
           ? cacheDiagnostics(createLocalAdapter(localId))
           : undefined,
     [
@@ -419,7 +426,7 @@ export function useGraphSource(source: Source, token: string): GraphSource {
   const paging = source.kind === 'github' ? gh.paging : local.paging;
   const count = graph?.commits.length ?? 0;
   const canPage =
-    Boolean(graph) && (source.kind === 'github' || (import.meta.env.DEV && Boolean(localSnap)));
+    Boolean(graph) && (source.kind === 'github' || (HAS_SERVER && Boolean(localSnap)));
   const more =
     canPage &&
     hasMore(graph?.truncated, count, paging) &&
@@ -465,11 +472,7 @@ export function useGraphSource(source: Source, token: string): GraphSource {
     state,
     diagnostics,
     refresh:
-      source.kind === 'github'
-        ? gh.refresh
-        : import.meta.env.DEV
-          ? () => void local.refresh()
-          : undefined,
+      source.kind === 'github' ? gh.refresh : HAS_SERVER ? () => void local.refresh() : undefined,
     repoName: graph ? { owner: graph.repo.owner, name: graph.repo.name } : undefined,
     loadMore: canPage ? (source.kind === 'github' ? gh.loadMore : local.loadMore) : undefined,
     history,

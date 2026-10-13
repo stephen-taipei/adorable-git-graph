@@ -23,6 +23,8 @@ export const MAX_DEPTH = 5000;
 export const DIAGNOSTICS_ENDPOINT = '/__agg/diagnostics';
 /** `GET`：dev server 掃描到、可以選擇的本機 repo 清單。只有 dev server 有。 */
 export const REPOS_ENDPOINT = '/__agg/repos';
+/** `GET`（text/event-stream）：npm CLI 的 server 用 SSE 推送 SnapshotEvent（dev server 用 HMR）。 */
+export const EVENTS_ENDPOINT = '/__agg/events';
 
 /** 啟動時指定的 repo（AGG_REPO_DIR，否則是執行 vite 的目錄）。 */
 export const DEFAULT_REPO = 'default';

@@ -8,6 +8,7 @@ import { LOCAL_ONLY, addLocalRepo, fetchLocalRepos } from './localRepos';
 import { AUTO_SCHEME, schemeCycle } from '@adorable/graph-ui';
 import type { ColorScheme, SchemeSetting, ThemeId } from '@adorable/graph-ui';
 import { t } from './i18n';
+import { HAS_SERVER } from './runtime';
 
 const TONE_ICON: Record<ColorScheme['tone'], string> = { day: '☀️', night: '🌙' };
 
@@ -90,7 +91,7 @@ export function SourceBar({
       </div>
 
       {/* 只有 dev server 能列出 / 讀取其他本機 repo；靜態建置只有建置當下的那一個 */}
-      {import.meta.env.DEV && source.kind === 'local' && !editing && (
+      {HAS_SERVER && source.kind === 'local' && !editing && (
         <LocalPicker
           current={source.id ?? DEFAULT_REPO}
           onPick={(id) => onNavigate(localSource(id))}

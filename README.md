@@ -9,6 +9,7 @@ branch 是流動著箭頭的管線，merge / fork 會自己長出來。版面是
 | **1**  | `apps/extension` — Chrome extension，在 github.com repo 頁面顯示該 repo 的 git graph                               | ✅   |
 | **1b** | `apps/extension-firefox` — Firefox（MV3）版，與 Chrome 版共用同一份原始碼                                          | ✅   |
 | **2**  | `apps/web` — `pnpm start` 於 localhost 查看本專案或**任何本機 repo** 的 git graph（與 extension 共用同一套 UI/UX） | ✅   |
+| **2b** | `apps/cli` — npm 套件 `adorable-git-graph`：在任何 repo 裡 `npx adorable-git-graph`，不用 clone 本專案             | ✅   |
 
 ## RD 日常診斷
 
@@ -25,6 +26,27 @@ pnpm install
 pnpm start --repo ~/code/repo  # 看指定 repo（省略 --repo 則看本專案）
 pnpm start            # 階段 2：http://localhost:4200 ，預設顯示「本專案」，可從選單換成其他本機 repo
 pnpm build            # 建置所有專案：Chrome → apps/extension/dist、Firefox → apps/extension-firefox/dist、web → apps/web/dist
+```
+
+### npm 套件（`npx adorable-git-graph`）
+
+```bash
+cd ~/code/some-repo
+npx adorable-git-graph            # （發布到 npm 之後）開啟瀏覽器；也可以 npx adorable-git-graph ~/code/other --port 4300 --no-open
+```
+
+與 `pnpm start` 是同一個畫面、同一套本機 repo endpoint（`apps/web/plugins/git-snapshot.ts` 的 `serveLocalRepos`），差別：
+
+- 不需要 Vite：`apps/cli/src/server.ts` 是獨立的 `node:http` server，提供預先建置好的畫面（`VITE_AGG_SERVER=1` 建置，**bundle 不含任何 git 歷史**），
+  即時更新用 SSE（`/__agg/events`）取代 HMR。
+- 只綁 `127.0.0.1`；每個請求都做與 dev server 相同的 Host / 同源檢查（DNS rebinding、其他 localhost 埠的頁面都讀不到）。
+- 零 runtime 相依（server 與 graph-core 打成單一 `dist/server.mjs`）；需要 Node ≥ 22 與 `git`。
+- 環境變數與 `pnpm start` 相同（`AGG_MAX_COMMITS`、`AGG_REPO_ROOTS`…）；手動加入的路徑記在 `local-repos-cli.json`。
+
+```bash
+pnpm --filter adorable-git-graph build   # → apps/cli/dist（web/ + server.mjs）與 LICENSE
+pnpm --filter adorable-git-graph e2e     # npm pack 後從 tarball 執行：內容檢查、即時更新、repo 選單、跨來源 / Host / 路徑穿越
+cd apps/cli && npm publish               # 發布（prepack 會重新建置）；第一次發布前先 npm pack --dry-run 檢查內容
 ```
 
 ### 階段 2 · Web app（`pnpm start`）
@@ -196,6 +218,7 @@ apps/
     src/                SourceBar（本機 / GitHub 切換、本機 repo 選單）、TokenDialog、useGraphSource、localRepos
   extension/            Chrome（MV3）：只有建置入口、圖示產生器與 e2e，原始碼都在 libs/extension-core
   extension-firefox/    Firefox（MV3）：建置入口、web-ext 的 lint / package / run、e2e（puppeteer + 真實 Firefox）
+  cli/                  npm 套件 adorable-git-graph：獨立 node:http server（SSE）+ 預先建置的 web 畫面、e2e（npm pack 後執行）
 libs/
   extension-core/       兩個瀏覽器共用的 extension：background、content script（Shadow DOM 掛載 FAB + overlay）、options 頁、
                         建置（content/background 打成 IIFE）與 manifest 產生器、圖示
@@ -234,6 +257,12 @@ tools/e2e/              e2e 共用：Chrome 偵測、mock GitHub API（含 CORS�
   content script / 頁面 DOM 看不到（e2e 有驗證）。更換 token 會清除快取。
 - 權限最小化：`storage` + `https://api.github.com/*`；content script 只匹配 `https://github.com/*`，非 repo 頁面不渲染任何東西（Chrome 與 Firefox 相同）。
 - commit 訊息等外部字串只經 React text node 與 canvas 繪製，無 `innerHTML`。
+
+## 授權與隱私
+
+- 授權：[Apache-2.0](LICENSE)。
+- 隱私權政策：[PRIVACY.md](PRIVACY.md)（Chrome Web Store / AMO 的隱私權政策網址可直接用
+  `https://github.com/stephen-taipei/adorable-git-grpah/blob/main/PRIVACY.md`）。不收集任何資料；只會連到 `api.github.com` 與 GitHub 的頭像圖片。
 
 ## 已知限制
 

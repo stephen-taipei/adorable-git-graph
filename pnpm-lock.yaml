@@ -18,6 +18,18 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  apps/cli:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
+      playwright-core:
+        specifier: ^1.63.0
+        version: 1.63.0
+      vite:
+        specifier: ^8.3.2
+        version: 8.3.2(@types/node@22.20.5)(yaml@2.9.0)
+
   apps/extension:
     dependencies:
       '@adorable/extension-core':
