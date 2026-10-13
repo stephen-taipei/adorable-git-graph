@@ -1934,6 +1934,8 @@ try {
       await opt.waitForLoadState();
       assert.equal(opt.url(), `chrome-extension://${extId}/options.html`);
       await opt.locator('input[type="password"]').fill('github_pat_e2e_secret');
+      // 儲存 token 會清掉 cache 並通知開著的 overlay 立刻重抓（data-invalidated），帶 token 的請求從這裡就開始了
+      seen.auth.length = 0;
       await opt.getByRole('button', { name: /^(儲存|Save)$/ }).click();
       await opt.locator('output', { hasText: /✓/ }).waitFor();
       await shot(opt, '11-options.png');
@@ -1943,7 +1945,6 @@ try {
       await page.bringToFront();
       await closeOverlay();
 
-      seen.auth.length = 0;
       await page.evaluate((u) => history.pushState({}, '', new URL(u).pathname), REPO_URL);
       await page.waitForTimeout(2000);
       await page.locator('.agg-fab').click();
