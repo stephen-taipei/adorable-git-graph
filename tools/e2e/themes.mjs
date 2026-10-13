@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const THEME_CSS = /\/themes\/(candy|hacker)\.css(?:$|\?)(?!url)/;
+const THEME_CSS = /\/themes\/(candy|hacker|halloween)\.css(?:$|\?)(?!url)/;
 
 export async function verifyThemes({ browser, origin, artifacts }) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -14,7 +14,7 @@ export async function verifyThemes({ browser, origin, artifacts }) {
   const errors = [];
   let hold = 0;
   let fail = false;
-  await ctx.route(/\/themes\/(candy|hacker)\.css/, async (route) => {
+  await ctx.route(/\/themes\/(candy|hacker|halloween)\.css/, async (route) => {
     const url = route.request().url();
     if (/[?&]url\b/.test(url)) return route.continue(); // dev-only module exporting the URL
     requested.push(url.match(THEME_CSS)?.[1] ?? url);
@@ -123,6 +123,36 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     assert.deepEqual(requested, ['candy', 'hacker']);
     results.push({ label: 'switching swaps the one theme link behind the boot screen' });
 
+    // The next click cycles on to Halloween: its own stylesheet and pumpkin mascot.
+    await page.click('.web-skin');
+    await done();
+    await page.waitForFunction(
+      () => document.querySelector('.agg-root')?.getAttribute('data-theme-id') === 'halloween',
+    );
+    s = await state();
+    assert.equal(s.links.length, 1, 'still one managed theme link');
+    assert.deepEqual(s.applied, ['halloween'], 'only the halloween theme applied');
+    assert.equal(s.stored, 'halloween');
+    assert(
+      await page.evaluate(() => Boolean(document.querySelector('svg[data-variant="pumpkin"]'))),
+      'halloween shows the pumpkin mascot',
+    );
+    assert.deepEqual(requested, ['candy', 'hacker', 'halloween']);
+    results.push({ label: 'halloween theme loads its own stylesheet and pumpkin mascot' });
+
+    // And wraps back to the default theme, from the cached stylesheet.
+    await page.click('.web-skin');
+    await done();
+    await page.waitForFunction(
+      () => document.querySelector('.agg-root')?.getAttribute('data-theme-id') === 'candy',
+    );
+    await page.click('.web-skin');
+    await done();
+    await page.waitForFunction(
+      () => document.querySelector('.agg-root')?.getAttribute('data-theme-id') === 'hacker',
+    );
+    results.push({ label: 'theme button cycles through every theme' });
+
     // A reload fetches only the saved theme.
     requested.length = 0;
     await page.reload();
@@ -137,6 +167,8 @@ export async function verifyThemes({ browser, origin, artifacts }) {
     for (const [id, mode] of [
       ['hacker', 'night'],
       ['hacker', 'day'],
+      ['halloween', 'night'],
+      ['halloween', 'day'],
       ['candy', 'day'],
       ['candy', 'night'],
     ]) {

@@ -2,14 +2,17 @@
 // and the 3D scene stay shared, only this data and the theme's stylesheet
 // (themes/<id>.css) differ. Colour mode (day/night) is a separate axis.
 
-export const THEME_IDS = ['candy', 'hacker'] as const;
+export const THEME_IDS = ['candy', 'hacker', 'halloween'] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 export const DEFAULT_THEME: ThemeId = 'candy';
 
 export const isThemeId = (v: unknown): v is ThemeId =>
   typeof v === 'string' && (THEME_IDS as readonly string[]).includes(v);
 
-export type MascotVariant = 'blob' | 'imp';
+export type MascotVariant = 'blob' | 'imp' | 'pumpkin';
+
+/** Decoration worn on top of every commit ball (HEAD and root keep their crown / sprout). */
+export type BallTopper = 'none' | 'horns' | 'witch-hat';
 
 export interface SceneDim {
   readonly body: string;
@@ -30,8 +33,8 @@ export interface ThemeAppearance {
   readonly mascot: MascotVariant;
   /** Mascot body colour. */
   readonly mascotColor: string;
-  /** Little devil horns on every commit ball. */
-  readonly horns: boolean;
+  /** What every commit ball wears on top. */
+  readonly topper: BallTopper;
 }
 
 export const THEME_APPEARANCES = {
@@ -56,7 +59,7 @@ export const THEME_APPEARANCES = {
     },
     mascot: 'blob',
     mascotColor: '#4fdc9a',
-    horns: false,
+    topper: 'none',
   },
   hacker: {
     id: 'hacker',
@@ -79,7 +82,30 @@ export const THEME_APPEARANCES = {
     },
     mascot: 'imp',
     mascotColor: '#39ff88',
-    horns: true,
+    topper: 'horns',
+  },
+  halloween: {
+    id: 'halloween',
+    palette: [
+      '#ff8a1f',
+      '#a970ff',
+      '#7ee04a',
+      '#ff4f6d',
+      '#ffd23f',
+      '#3fd0c4',
+      '#ff7ac8',
+      '#c9a2ff',
+      '#e8e0c8',
+    ],
+    outline: '#1e1029',
+    selection: { outer: '#1e1029', inner: '#ff8a1f' },
+    dim: {
+      day: { body: '#eee2d4', outline: '#c8b5a2' },
+      night: { body: '#3b2a4f', outline: '#56406f' },
+    },
+    mascot: 'pumpkin',
+    mascotColor: '#ff8a1f',
+    topper: 'witch-hat',
   },
 } satisfies Record<ThemeId, ThemeAppearance>;
 

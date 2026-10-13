@@ -9,6 +9,7 @@ import type { Mouth } from './textures';
 import { clamp, clamp01, damp, easeInOutCubic, easeOutElastic, rng } from './easing';
 import { computeMetrics, planWindow, visibleRows } from './geometry';
 import type { CanvasWindow, LogMetrics } from './geometry';
+import type { BallTopper } from '../themes/config';
 
 export type SceneTheme = 'day' | 'night';
 
@@ -17,7 +18,7 @@ export interface SceneAppearance {
   readonly outline: string;
   readonly selection: { readonly outer: string; readonly inner: string };
   readonly dim: Readonly<Record<SceneTheme, { readonly body: string; readonly outline: string }>>;
-  readonly horns: boolean;
+  readonly topper: BallTopper;
 }
 
 export const DEFAULT_SCENE_APPEARANCE: SceneAppearance = {
@@ -27,7 +28,7 @@ export const DEFAULT_SCENE_APPEARANCE: SceneAppearance = {
     day: { body: '#e6e1f1', outline: '#bcb3d8' },
     night: { body: '#6a5fa8', outline: '#8479c4' },
   },
-  horns: false,
+  topper: 'none',
 };
 
 export interface SceneOptions {
@@ -52,7 +53,7 @@ const FALLBACK_VIEW_H = 640;
 
 interface Extra {
   sprite: THREE.Sprite;
-  kind: 'crown' | 'sparkle' | 'sweat' | 'sprout' | 'horns';
+  kind: 'crown' | 'sparkle' | 'sweat' | 'sprout' | 'horns' | 'hat';
   base: THREE.Vector3;
 }
 
@@ -252,7 +253,7 @@ export class LogGraphScene {
 
   /** Switch theme colours; decorations that change the balls rebuild them without a replay. */
   setAppearance(appearance: SceneAppearance) {
-    const rebuild = appearance.horns !== this.appearance.horns;
+    const rebuild = appearance.topper !== this.appearance.topper;
     this.appearance = appearance;
     if (rebuild && this.layout) {
       const keep = new Map(this.actors.map((a) => [a.node.sha, a]));
@@ -655,8 +656,11 @@ export class LogGraphScene {
     };
 
     // Little devil horns sit on the upper rim of the ball, under any crown.
-    if (this.appearance.horns)
+    if (this.appearance.topper === 'horns')
       addExtra('horns', this.kit.horns, radius * 1.7, radius * 0.62, 0, radius * 0.86);
+    // A tilted witch hat; HEAD and the root keep their crown / sprout in its place.
+    if (this.appearance.topper === 'witch-hat' && !node.isHead && node.kind !== 'root')
+      addExtra('hat', this.kit.witchHat, radius * 1.5, radius * 1.2, radius * 0.1, radius * 1.05);
     if (node.kind === 'root') addExtra('sprout', this.kit.sprout, 0.62, 0.62, 0, radius + 0.16);
     if (node.isHead) addExtra('crown', this.kit.crown, 0.78, 0.62, 0.02, radius + 0.17);
     if (node.kind === 'feat')
@@ -885,6 +889,9 @@ export class LogGraphScene {
           ex.sprite.material.rotation = this.t * 0.8 * motion;
         } else if (ex.kind === 'horns') {
           ex.sprite.position.y = ex.base.y + Math.abs(w) * 0.03;
+        } else if (ex.kind === 'hat') {
+          ex.sprite.position.y = ex.base.y + Math.abs(w) * 0.04;
+          ex.sprite.material.rotation = -0.14 + w * 0.06;
         } else if (ex.kind === 'sweat') {
           ex.sprite.position.y = ex.base.y - ((this.t * 0.5 + a.phase) % 1) * 0.12 * motion;
         } else {

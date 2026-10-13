@@ -21,10 +21,11 @@ import {
   syncAuth,
 } from './authScope';
 
-const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈' };
+const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈', halloween: '🎃' };
 const THEME_ID_LABEL: Record<ThemeId, string> = {
   candy: t.themeIdCandy,
   hacker: t.themeIdHacker,
+  halloween: t.themeIdHalloween,
 };
 
 function usePrefersDark(): boolean {

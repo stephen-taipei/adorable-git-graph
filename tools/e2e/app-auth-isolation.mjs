@@ -887,7 +887,7 @@ export async function verifyLanHttp({ browser, outDir, defaultRepo, defaultCommi
     assert(!lanPaths.some((p) => p.startsWith('/__agg')), 'no Git endpoint on the LAN origin');
     // Theme stylesheets are separate assets; only the active one is requested.
     const themeAssets = [...new Set(lanPaths)]
-      .map((p) => p.match(/^\/assets\/(candy|hacker)-[\w-]+\.css$/)?.[1])
+      .map((p) => p.match(/^\/assets\/(candy|hacker|halloween)-[\w-]+\.css$/)?.[1])
       .filter(Boolean);
     assert.deepEqual(
       themeAssets,
@@ -895,7 +895,11 @@ export async function verifyLanHttp({ browser, outDir, defaultRepo, defaultCommi
       'production App requests only the active theme stylesheet',
     );
     assert(
-      readdirSync(resolve(outDir, 'assets')).some((f) => /^hacker-[\w-]+\.css$/.test(f)),
+      ['hacker', 'halloween'].every((id) =>
+        readdirSync(resolve(outDir, 'assets')).some((f) =>
+          new RegExp(`^${id}-[\\w-]+\\.css$`).test(f),
+        ),
+      ),
       'other themes ship as separate, unrequested assets',
     );
     await page.screenshot({ path: resolve(artifacts, 'lan-http-non-secure.png') });

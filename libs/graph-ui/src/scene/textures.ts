@@ -34,6 +34,7 @@ export class TextureKit {
   readonly sparkle: THREE.CanvasTexture;
   readonly sweat: THREE.CanvasTexture;
   readonly horns: THREE.CanvasTexture;
+  readonly witchHat: THREE.CanvasTexture;
   readonly gloss: THREE.CanvasTexture;
   readonly dots: THREE.CanvasTexture;
 
@@ -266,6 +267,42 @@ export class TextureKit {
           ctx.fill();
           ctx.stroke();
         }
+      }),
+    );
+
+    // A small pointy witch hat with a crooked tip and an orange band (halloween theme).
+    this.witchHat = this.add(
+      makeCanvas(192, 160, (ctx) => {
+        ctx.strokeStyle = OUTLINE_COLOR;
+        ctx.lineWidth = 9;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.fillStyle = '#4a2a6e';
+        // brim
+        ctx.beginPath();
+        ctx.ellipse(96, 132, 84, 20, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // cone, tip bent to the right
+        ctx.beginPath();
+        ctx.moveTo(52, 128);
+        ctx.quadraticCurveTo(70, 70, 92, 34);
+        ctx.quadraticCurveTo(110, 8, 146, 18);
+        ctx.quadraticCurveTo(118, 30, 112, 56);
+        ctx.quadraticCurveTo(128, 96, 140, 128);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // band
+        ctx.fillStyle = '#ff8a1f';
+        ctx.beginPath();
+        ctx.moveTo(60, 104);
+        ctx.quadraticCurveTo(96, 114, 133, 104);
+        ctx.lineTo(139, 124);
+        ctx.quadraticCurveTo(96, 136, 54, 124);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
       }),
     );
 
