@@ -32,6 +32,7 @@ async function setup() {
   vi.stubGlobal('chrome', {
     runtime: {
       lastError: undefined,
+      sendMessage: vi.fn(async () => ({ ok: true, data: null })),
       connect: vi.fn(() => {
         const p = fakePort();
         ports.push(p);
@@ -42,7 +43,7 @@ async function setup() {
   const { sendToBackground } = await import('./messages');
   const pageEvent = (type: string, persisted: boolean) =>
     win.dispatchEvent(Object.assign(new Event(type), { persisted }));
-  return { ports, sendToBackground, pageEvent };
+  return { ports, sendToBackground, pageEvent, runtime: (globalThis as any).chrome.runtime };
 }
 
 describe('sendToBackground', () => {
@@ -81,5 +82,15 @@ describe('sendToBackground', () => {
     expect(ports[1]!.posted).toEqual([{ type: 'fetch-graph', owner: 'o', repo: 'r' }]);
     ports[1]!.reply({ ok: true, data: 'fresh' });
     await expect(res).resolves.toEqual({ ok: true, data: 'fresh' });
+  });
+
+  it('sends open-options with runtime.sendMessage so Firefox keeps the click as user input', async () => {
+    const { ports, sendToBackground, runtime } = await setup();
+    await expect(sendToBackground({ type: 'open-options' })).resolves.toEqual({
+      ok: true,
+      data: null,
+    });
+    expect(runtime.sendMessage).toHaveBeenCalledWith({ type: 'open-options' });
+    expect(ports).toHaveLength(0);
   });
 });
