@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { findChrome } from '../../../tools/e2e/chrome-path.mjs';
+import { assertExtensionLoaded, findExtensionChrome } from '../../../tools/e2e/chrome-path.mjs';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const out = resolve(appRoot, 'store-assets');
@@ -46,7 +46,7 @@ const built = spawnSync(process.execPath, ['scripts/build.mjs'], {
 if (built.status !== 0) process.exit(built.status ?? 1);
 
 const ctx = await chromium.launchPersistentContext(profileDir, {
-  executablePath: findChrome(),
+  executablePath: findExtensionChrome(chromium),
   headless: false,
   viewport: SIZE,
   deviceScaleFactor: 1,
@@ -63,6 +63,7 @@ const ctx = await chromium.launchPersistentContext(profileDir, {
 });
 
 try {
+  await assertExtensionLoaded(ctx);
   if (mock) {
     const { fakeGithubPage } = await import('../../../tools/e2e/fake-github-page.mjs');
     await ctx.route('https://github.com/**', (route) =>

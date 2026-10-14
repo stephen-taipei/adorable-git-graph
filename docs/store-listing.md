@@ -8,7 +8,7 @@
 - [ ] Firefox e2e 在 macOS 跑過：`pnpm --filter @adorable/extension-firefox e2e`（雲端容器沒有 Firefox）
 - [ ] Chrome：`pnpm --filter @adorable/extension release` → `apps/extension/release/adorable-git-graph-chrome-<version>.zip`
 - [ ] Firefox：`pnpm --filter @adorable/extension-firefox release` → `web-ext-artifacts/` 的 add-on zip 與 `adorable-git-graph-source.zip`
-- [ ] 截圖與宣傳圖：`pnpm --filter @adorable/extension store-assets`（自己的電腦，需要連得到 github.com；預設拍 `stephen-taipei/adorable-git-grpah`，可加 `-- --repo owner/name`）
+- [ ] 截圖與宣傳圖：第一次先裝 Chromium（`pnpm --filter @adorable/extension exec playwright-core install chromium`；Google Chrome 正式版不能載入未封裝的 extension），再執行 `pnpm --filter @adorable/extension store-assets`（自己的電腦，需要連得到 github.com；預設拍 `stephen-taipei/adorable-git-grpah`，可加 `-- --repo owner/name`）
 - [ ] 隱私權政策網址可以打開：<https://github.com/stephen-taipei/adorable-git-grpah/blob/main/PRIVACY.md>
 - [ ] Chrome 開發者帳號（一次性註冊費）、AMO 帳號
 

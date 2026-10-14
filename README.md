@@ -215,7 +215,7 @@ infinite scroll（本機 705 筆 / GitHub mock：捲到底分批載入、不跳�
 需求：Firefox（`FIREFOX_PATH` 可指定）與 Xvfb（headless Firefox 沒有 EGL，WebGL 要靠虛擬顯示器；或用 `xvfb-run` 包起來）。
 找不到 Firefox 時會提示並略過，設了 `CI` 或 `REQUIRE_FIREFOX` 則視為失敗。
 
-三套的截圖輸出到各自的 `e2e/.artifacts/`。Chrome 找不到時設定 `CHROME_PATH`；`FIREFOX_PATH` 指向不存在的檔案會直接報錯（不會悄悄改用別的 Firefox）。
+三套的截圖輸出到各自的 `e2e/.artifacts/`。Chrome extension 的 e2e 與 `store-assets` 要用 **Chromium**：Google Chrome 正式版（137 起）會忽略 `--load-extension`，extension 不會載入。第一次先執行 `pnpm --filter @adorable/extension exec playwright-core install chromium`，或用 `CHROME_PATH` 指向 Chromium / Chrome for Testing。web app 的 e2e 找不到 Chrome 時設定 `CHROME_PATH`；`FIREFOX_PATH` 指向不存在的檔案會直接報錯（不會悄悄改用別的 Firefox）。
 
 ## 專案結構
 
