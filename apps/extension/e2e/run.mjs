@@ -22,7 +22,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { findChrome } from '../../../tools/e2e/chrome-path.mjs';
+import { assertExtensionLoaded, findExtensionChrome } from '../../../tools/e2e/chrome-path.mjs';
 import { fakeGithubPage } from '../../../tools/e2e/fake-github-page.mjs';
 import { colorDistance, inkRatio, samplePixels } from '../../../tools/e2e/pixels.mjs';
 import {
@@ -176,7 +176,7 @@ await run('node', ['scripts/build.mjs'], {
 });
 
 const ctx = await chromium.launchPersistentContext(profileDir, {
-  executablePath: findChrome(),
+  executablePath: findExtensionChrome(chromium),
   headless: false,
   viewport: { width: 1440, height: 900 },
   args: [
@@ -218,8 +218,8 @@ let decoder;
 const ui = (fn, arg) => page.locator('.agg-root').evaluate(fn, arg);
 
 try {
-  let sw = ctx.serviceWorkers()[0];
-  sw ??= await ctx.waitForEvent('serviceworker', { timeout: 15_000 });
+  await assertExtensionLoaded(ctx);
+  const sw = ctx.serviceWorkers()[0];
   const extId = new URL(sw.url()).host;
   console.log('extension id:', extId);
 
