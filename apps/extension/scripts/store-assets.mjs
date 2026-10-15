@@ -8,6 +8,7 @@
 //   promo-marquee-1400x560.png   Chrome marquee 宣傳圖（選填）
 // 用法（在自己的電腦上，需要連得到 github.com）：
 //   pnpm --filter @adorable/extension store-assets [-- --repo owner/name]
+//   --detail <sha>：詳情截圖指定這個 commit（預設自動挑一個沒有內文、沒被 revert 的一般 commit）
 //   --mock：不連外網，改用 e2e 的 mock API 與假 GitHub 頁面（只用來驗證腳本本身，圖片內容是測試資料，不要上傳）
 // 輸出到 apps/extension/store-assets/。未登入的 GitHub API 每小時 60 次；一次執行約 10–20 次。
 import { spawnSync } from 'node:child_process';
@@ -95,29 +96,62 @@ try {
   await open();
   await shot('screenshot-1-graph.png');
 
-  // 詳情：挑內文短的一般 commit（沒有內文或 4 行以內）；原樣換行的長內文在截圖裡斷句很怪
+  // 詳情：挑一個適合展示的 commit。--detail <sha> 可以直接指定；否則依序找：
+  //   不是 merge、不是 Revert / Merge 自動訊息、後來沒有被 revert，
+  //   先找沒有內文的，再找內文 3 行以內的（原樣換行的長內文在截圖裡斷句很怪）
+  const commits = page.locator('.agg-commit');
   const messageLines = () =>
     page
       .locator('.agg-detail-message')
       .evaluateAll((els) => (els[0] ? els[0].textContent.trim().split('\n').length : 0));
-  const rows = Math.min(await page.locator('.agg-commit').count(), 15);
-  let picked = false;
-  let last = -1;
-  for (let i = 1; i < rows && !picked; i++) {
-    last = i;
-    await page.locator('.agg-commit').nth(i).click();
+  const rows = await commits.evaluateAll((els) =>
+    els.slice(0, 15).map((el) => ({
+      sha: el.dataset.sha ?? '',
+      // title 是完整訊息（畫面上的文字會拆掉 feat: 之類的前綴）
+      subject: (el.querySelector('.agg-subject')?.getAttribute('title') ?? '')
+        .split('\n')[0]
+        .trim(),
+      merge: Boolean(el.querySelector('.agg-merge')),
+    })),
+  );
+  const reverted = new Set(
+    rows.map((r) => /^Revert "(.+)"$/.exec(r.subject)?.[1]).filter((x) => x !== undefined),
+  );
+  const candidates = rows
+    .map((r, i) => ({ ...r, i }))
+    .filter(
+      (r) =>
+        r.i > 0 &&
+        !r.merge &&
+        !/^(Revert "|Merge (pull request|branch))/.test(r.subject) &&
+        !reverted.has(r.subject),
+    );
+  let selected = -1;
+  const select = async (i) => {
+    if (selected === i) return; // 再點一次已選的列會收起詳情
+    await commits.nth(i).click();
     await page.locator('.agg-detail').waitFor();
-    const row = page.locator('.agg-commit').nth(i);
-    const merge = await row.locator('.agg-merge').count();
-    // Revert / Merge 這類自動產生的訊息不適合當展示
-    const auto = /\b(Revert "|Merge (pull request|branch))/.test(await row.innerText());
-    picked = !merge && !auto && (await messageLines()) <= 4;
+    selected = i;
+  };
+  const pinned = args.includes('--detail') ? args[args.indexOf('--detail') + 1] : undefined;
+  let detailRow = pinned ? rows.findIndex((r) => r.sha.startsWith(pinned)) : -1;
+  if (pinned && detailRow < 0) throw new Error(`--detail ${pinned}: not in the first rows`);
+  if (detailRow < 0) {
+    if (candidates.length === 0) {
+      throw new Error(
+        'no commit in the first 15 rows fits the detail screenshot (all merges / reverts); pass --detail <sha>',
+      );
+    }
+    const lines = [];
+    for (const c of candidates) {
+      await select(c.i);
+      lines.push({ i: c.i, n: await messageLines() });
+    }
+    detailRow =
+      lines.find((l) => l.n === 0)?.i ?? lines.find((l) => l.n <= 3)?.i ?? candidates[0].i;
   }
-  // 都不合適：退回第 4 列（再點一次已選的列會收起詳情，所以先換到別列）
-  if (!picked && last !== 3) {
-    await page.locator('.agg-commit').nth(3).click();
-    await page.locator('.agg-detail').waitFor();
-  }
+  await select(detailRow);
+  console.log(`detail screenshot: ${rows[detailRow]?.sha.slice(0, 7)} ${rows[detailRow]?.subject}`);
   await page.waitForTimeout(600);
   await page.mouse.move(2, 2);
   await shot('screenshot-2-detail.png');
