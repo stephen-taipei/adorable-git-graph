@@ -16,7 +16,7 @@ import type { Locale } from '../i18n';
 import { copyText } from './format';
 
 const wording = {
-  title: ['唯讀診斷', 'Read-only diagnostics'],
+  title: ['比較與變更', 'Compare & changes'],
   graph: ['圖形涵蓋範圍', 'Graph coverage'],
   source: ['來源', 'Source'],
   refs: ['Refs', 'Refs'],
@@ -61,8 +61,8 @@ const wording = {
   none: ['完整清單沒有項目。', 'No entries in the complete list.'],
   incomplete: ['此清單不足以判定沒有變更。', 'This list cannot establish absence of changes.'],
   disabled: [
-    '此來源只提供快照；診斷查詢無法使用。',
-    'This source provides a snapshot only; diagnostics are unavailable.',
+    '此來源只提供快照，無法查詢比較與變更。',
+    'This source provides a snapshot only; compare & changes are unavailable.',
   ],
   textMissing: [
     '未取得文字 patch。可能是 binary、大型檔案或來源未提供。',
@@ -77,8 +77,8 @@ const wording = {
   binary: ['Binary', 'Binary'],
   draft: ['草稿', 'Draft'],
   fullSha: ['固定 SHA', 'Pinned SHA'],
-  open: ['開啟診斷', 'Open diagnostics'],
-  close: ['收合診斷', 'Close diagnostics'],
+  open: ['開啟比較與變更', 'Open compare & changes'],
+  close: ['收合比較與變更', 'Close compare & changes'],
 } as const;
 type Key = keyof typeof wording;
 const tr = (loc: Locale, key: Key) => wording[key][loc === 'zh-TW' ? 0 : 1];

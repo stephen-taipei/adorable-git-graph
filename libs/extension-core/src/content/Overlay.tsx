@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { ErrorBoundary, GitGraphViewer } from '@adorable/graph-ui';
+import { ErrorBoundary, GitGraphViewer, THEME_IDS, detectLocale } from '@adorable/graph-ui';
+import type { ThemeId } from '@adorable/graph-ui';
 import { sendToBackground } from '../shared/messages';
 import type { RepoRef } from '../shared/repo';
 import { useGraph } from './useGraph';
@@ -7,14 +8,25 @@ import { useAnimationOff } from './useAnimationOff';
 import { useDetailSize } from './useDetailSize';
 import { useGithubColorMode } from './useGithubColorMode';
 
+const THEME_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈', halloween: '🎃' };
+const THEME_LABEL: Record<ThemeId, [zh: string, en: string]> = {
+  candy: ['主題：糖果（點一下切換）', 'Theme: Candy (click to switch)'],
+  hacker: ['主題：駭客小惡魔（點一下切換）', 'Theme: Hacker imp (click to switch)'],
+  halloween: ['主題：萬聖節南瓜（點一下切換）', 'Theme: Halloween pumpkin (click to switch)'],
+};
+
 export function Overlay({
   repo,
   onClose,
   epoch = 0,
+  themeId,
+  onThemeIdChange,
 }: {
   repo: RepoRef;
   onClose: () => void;
   epoch?: number;
+  themeId: ThemeId;
+  onThemeIdChange: (id: ThemeId) => void;
 }) {
   const { state, refresh, diagnostics, diagnosticGeneration, loadMore, history } = useGraph(
     repo,
@@ -23,6 +35,7 @@ export function Overlay({
   const [detailSize, setDetailSize] = useDetailSize();
   const [animationOff, setAnimationOff] = useAnimationOff();
   const colorMode = useGithubColorMode();
+  const themeLabel = THEME_LABEL[themeId][detectLocale() === 'zh-TW' ? 0 : 1];
   const panelRef = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
 
@@ -127,6 +140,21 @@ export function Overlay({
                 : undefined
             }
             theme={colorMode}
+            themeId={themeId}
+            actionsExtra={
+              <button
+                type="button"
+                className="agg-btn agg-theme-switch"
+                title={themeLabel}
+                aria-label={themeLabel}
+                data-theme-choice={themeId}
+                onClick={() =>
+                  onThemeIdChange(THEME_IDS[(THEME_IDS.indexOf(themeId) + 1) % THEME_IDS.length]!)
+                }
+              >
+                <span aria-hidden="true">{THEME_ICON[themeId]}</span>
+              </button>
+            }
             onRefresh={refresh}
             onLoadMore={loadMore}
             history={history}

@@ -13,11 +13,13 @@
   align-items: center;
   gap: 6px;
   padding: 5px 14px 5px 6px;
-  color: #2b2140;
-  background: #fffaf0;
-  border: 3px solid #2b2140;
+  --agg-fab-ink: #2b2140;
+  --agg-fab-bg: #fffaf0;
+  color: var(--agg-fab-ink);
+  background: var(--agg-fab-bg);
+  border: 3px solid var(--agg-fab-ink);
   border-radius: 999px;
-  box-shadow: 0 4px 0 #2b2140;
+  box-shadow: 0 4px 0 var(--agg-fab-ink);
   font:
     900 14px/1 ui-rounded,
     'SF Pro Rounded',
@@ -36,12 +38,23 @@
 
 .agg-fab:hover {
   transform: translateY(-3px) rotate(-2deg);
-  box-shadow: 0 7px 0 #2b2140;
+  box-shadow: 0 7px 0 var(--agg-fab-ink);
 }
 
 .agg-fab:active {
   transform: translateY(3px);
-  box-shadow: 0 0 0 #2b2140;
+  box-shadow: 0 0 0 var(--agg-fab-ink);
+}
+
+/* 浮動按鈕跟著目前主題換色（在 overlay 外面，吃不到主題 CSS 的變數） */
+.agg-fab[data-theme-id='hacker'] {
+  --agg-fab-ink: #2dffc4;
+  --agg-fab-bg: #0c1a16;
+}
+
+.agg-fab[data-theme-id='halloween'] {
+  --agg-fab-ink: #ffb25c;
+  --agg-fab-bg: #261638;
 }
 
 .agg-fab:focus-visible {

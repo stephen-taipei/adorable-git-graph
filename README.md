@@ -13,7 +13,7 @@ branch 是流動著箭頭的管線，merge / fork 會自己長出來。版面是
 
 ## RD 日常診斷
 
-新版為唯讀診斷助手：`repo → base/head → 雙向獨有 commits → changed files → lazy diff → 含 SHA 的摘要`。圖形涵蓋範圍、來源查詢完整性與取得時間分開顯示。資料不足保留 `unknown`／`null`，不把載入集合當完整 Git 結論。
+新版加入唯讀的「比較與變更」面板：`repo → base/head → 雙向獨有 commits → changed files → lazy diff → 含 SHA 的摘要`。圖形涵蓋範圍、來源查詢完整性與取得時間分開顯示。資料不足保留 `unknown`／`null`，不把載入集合當完整 Git 結論。
 
 GitHub commit／PR 頁面直接保留調查脈絡。PR 先提供基本資訊與固定 base/head SHA。完整操作、查詢語意、Chrome／Firefox 安裝更新與限制見 [RD 診斷文件](docs/rd-diagnostics.md)；測試範圍與未驗證項目見 [驗證紀錄](docs/rd-validation.md)；試用門檻與資料最小化方案見 [RD 試用方案](docs/rd-pilot.md)。試用指標尚未實測。
 

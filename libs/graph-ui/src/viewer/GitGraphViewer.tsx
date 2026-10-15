@@ -71,6 +71,8 @@ export interface GitGraphViewerProps {
   onOpenCommit?: (node: GraphNode) => void;
   /** 顯示在標題列正下方的額外控制項（例如資料來源切換）。 */
   headerExtra?: ReactNode;
+  /** 標題列右側按鈕區（設定按鈕前面）的額外按鈕，例如 extension 的主題切換。 */
+  actionsExtra?: ReactNode;
   /** 資料來源的識別（例如 `local` / `github`）。同名 repo 換來源時不會被當成「剛 commit 了一筆」的增量更新。 */
   sourceKey?: string;
   /**
@@ -180,6 +182,7 @@ export function GitGraphViewer({
   onOpenSettings,
   onOpenCommit,
   headerExtra,
+  actionsExtra,
   sourceKey,
   onLoadMore,
   history,
@@ -865,6 +868,7 @@ export function GitGraphViewer({
               <RefreshIcon />
             </IconButton>
           )}
+          {actionsExtra}
           {onOpenSettings && (
             <IconButton label={t.settings} onClick={onOpenSettings}>
               <GearIcon />

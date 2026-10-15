@@ -2919,6 +2919,37 @@ try {
     },
   );
 
+  await step('compare & changes panel: title and toggle labels (en-US / zh-TW)', async () => {
+    const labels = {
+      'en-US': ['Compare & changes', 'Open compare & changes', 'Close compare & changes'],
+      'zh-TW': ['比較與變更', '開啟比較與變更', '收合比較與變更'],
+    };
+    for (const [locale, [title, open, close]] of Object.entries(labels)) {
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale });
+      ctx.setDefaultTimeout(30_000 * SCALE);
+      ctx.setDefaultNavigationTimeout(30_000 * SCALE);
+      try {
+        const pg = await ctx.newPage();
+        watchErrors(pg, `${locale} compare panel`);
+        await pg.goto(base);
+        await pg.locator('.agg-title-text', { hasText: 'octo/cat' }).waitFor();
+        const panel = pg.getByRole('region', { name: title, exact: true });
+        await panel.waitFor();
+        const toggle = panel.locator('.agg-diag-toggle');
+        assert.match(await toggle.innerText(), new RegExp(`^${title}\\s*\\+$`));
+        assert.equal(await toggle.getAttribute('aria-label'), open);
+        await toggle.click();
+        await panel.locator('.agg-diag-body').waitFor();
+        assert.equal(await toggle.getAttribute('aria-label'), close);
+        await toggle.click();
+        await panel.locator('.agg-diag-body').waitFor({ state: 'detached' });
+        await pg.close();
+      } finally {
+        await ctx.close();
+      }
+    }
+  });
+
   await step('zh-TW interface: aria labels, chips, search counter, detail buttons', async () => {
     const zhCtx = await browser.newContext({
       viewport: { width: 1440, height: 900 },

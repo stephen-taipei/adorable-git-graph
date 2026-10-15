@@ -2641,6 +2641,78 @@ try {
   );
 
   await step(
+    'theme switch: cycles candy → hacker → halloween, restyles overlay and FAB, remembered in extension storage',
+    async () => {
+      const LABELS = {
+        candy: /^(主題：糖果（點一下切換）|Theme: Candy \(click to switch\))$/,
+        hacker: /^(主題：駭客小惡魔（點一下切換）|Theme: Hacker imp \(click to switch\))$/,
+        halloween:
+          /^(主題：萬聖節南瓜（點一下切換）|Theme: Halloween pumpkin \(click to switch\))$/,
+      };
+      const rootTheme = () => ui((r) => r?.dataset.themeId ?? null);
+      const fabTheme = () =>
+        shadow((sr) => sr?.querySelector('.agg-fab')?.getAttribute('data-theme-id') ?? null);
+      const switchLabel = () =>
+        shadow((sr) => sr?.querySelector('.agg-theme-switch')?.getAttribute('aria-label') ?? '');
+      const cardBg = () =>
+        ui((r) => getComputedStyle(r.querySelector('.agg-main')).backgroundColor);
+      const fabBg = () =>
+        shadow((sr) => getComputedStyle(sr.querySelector('.agg-fab')).backgroundColor);
+      const stored = () =>
+        withSettings(async () => (await chrome.storage.local.get('themeId')).themeId ?? null);
+      const clearStored = () => withSettings(async () => chrome.storage.local.remove('themeId'));
+      try {
+        await closeOverlay();
+        await clearStored();
+        assert.equal(await fabTheme(), 'candy', 'the FAB starts in the default theme');
+        const fabColours = { candy: await fabBg() };
+        await openOverlay();
+        assert.equal(await rootTheme(), 'candy', 'the overlay starts in the default theme');
+        const cards = { candy: await cardBg() };
+        for (const next of ['hacker', 'halloween']) {
+          await click('.agg-theme-switch');
+          await eventually(rootTheme, next, `the overlay switches to ${next}`);
+          await eventually(
+            async () => LABELS[next].test(await switchLabel()),
+            true,
+            `the switch button names ${next}`,
+          );
+          await eventually(stored, next, `${next} is saved in extension storage`);
+          cards[next] = await cardBg();
+          if (next === 'hacker') await shot('10-theme-hacker.png');
+          // overlay 開著時沒有浮動按鈕：關掉再看它跟著換色
+          await closeOverlay();
+          assert.equal(await fabTheme(), next, `the FAB follows ${next}`);
+          fabColours[next] = await fabBg();
+          await openOverlay();
+        }
+        assert.equal(
+          new Set(Object.values(cards)).size,
+          3,
+          'each theme paints its own card colour',
+        );
+        assert.equal(new Set(Object.values(fabColours)).size, 3, 'each theme paints its own FAB');
+        // 重新打開會重播：等畫完再比對節點位置
+        await replayDone();
+        await assertGraphSync('halloween theme');
+        // 重新載入頁面（新的 content script）：第一次 render 就是 halloween
+        await closeOverlay();
+        await gotoRepo();
+        await waitFor('.agg-fab[data-theme-id="halloween"]');
+        await openOverlay();
+        assert.equal(await rootTheme(), 'halloween', 'still halloween after a page reload');
+        // 第三個之後回到第一個
+        await click('.agg-theme-switch');
+        await eventually(rootTheme, 'candy', 'wraps around to candy');
+        await eventually(stored, 'candy', 'candy saved too');
+      } finally {
+        await closeOverlay();
+        await clearStored();
+      }
+    },
+  );
+
+  await step(
     'animation toggle: remembered in extension storage, not in github.com localStorage (old value migrated)',
     async () => {
       const LEGACY = 'agg:animation-off';

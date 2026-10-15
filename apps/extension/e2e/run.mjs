@@ -2250,6 +2250,112 @@ try {
   );
 
   await step(
+    'theme switch: cycles candy → hacker → halloween, restyles overlay and FAB, remembered in extension storage, header fits at 320px touch',
+    async () => {
+      const LABELS = {
+        candy: /^(主題：糖果（點一下切換）|Theme: Candy \(click to switch\))$/,
+        hacker: /^(主題：駭客小惡魔（點一下切換）|Theme: Hacker imp \(click to switch\))$/,
+        halloween:
+          /^(主題：萬聖節南瓜（點一下切換）|Theme: Halloween pumpkin \(click to switch\))$/,
+      };
+      const switcher = () => page.locator('.agg-theme-switch');
+      const rootTheme = () => ui((r) => r.dataset.themeId ?? null);
+      const fabTheme = () => page.locator('.agg-fab').getAttribute('data-theme-id');
+      const cardBg = () =>
+        ui((r) => getComputedStyle(r.querySelector('.agg-main')).backgroundColor);
+      const fabBg = () =>
+        page.locator('.agg-fab').evaluate((el) => getComputedStyle(el).backgroundColor);
+      const stored = () =>
+        sw.evaluate(async () => (await chrome.storage.local.get('themeId')).themeId ?? null);
+      try {
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('themeId'));
+        assert.equal(await fabTheme(), 'candy', 'the FAB starts in the default theme');
+        const fabColours = { candy: await fabBg() };
+        await openOverlay();
+        assert.equal(await rootTheme(), 'candy', 'the overlay starts in the default theme');
+        const cards = { candy: await cardBg() };
+        for (const next of ['hacker', 'halloween']) {
+          await switcher().click();
+          await eventually(rootTheme, next, `the overlay switches to ${next}`);
+          await eventually(
+            () =>
+              switcher()
+                .getAttribute('aria-label')
+                .then((l) => LABELS[next].test(l)),
+            true,
+            `the switch button names ${next}`,
+          );
+          await eventually(stored, next, `${next} is saved in extension storage`);
+          cards[next] = await cardBg();
+          if (next === 'hacker') await shot(page, '10-theme-hacker.png');
+          // overlay 開著時沒有浮動按鈕：關掉再看它跟著換色
+          await closeOverlay();
+          assert.equal(await fabTheme(), next, `the FAB follows ${next}`);
+          fabColours[next] = await fabBg();
+          await openOverlay();
+        }
+        assert.equal(
+          new Set(Object.values(cards)).size,
+          3,
+          'each theme paints its own card colour',
+        );
+        assert.equal(new Set(Object.values(fabColours)).size, 3, 'each theme paints its own FAB');
+        // 重新打開會重播：等畫完再比對節點位置
+        await page.locator('.agg-canvas[data-replay="done"]').waitFor({ timeout: REPLAY_TIMEOUT });
+        await assertGraphSync('halloween theme');
+        // 重新載入頁面（新的 content script）：第一次 render 就是 halloween
+        await closeOverlay();
+        await page.reload();
+        await page.locator('.agg-fab[data-theme-id="halloween"]').waitFor({ timeout: 10_000 });
+        await openOverlay();
+        assert.equal(await rootTheme(), 'halloween', 'still halloween after a page reload');
+        // 第三個之後回到第一個
+        await switcher().click();
+        await eventually(rootTheme, 'candy', 'wraps around to candy');
+        await eventually(stored, 'candy', 'candy saved too');
+
+        // 320px 觸控（按鈕變 42px）：多了主題鈕，標題列按鈕仍要整排放得下，關閉鈕不能被裁掉
+        const cdp = await page.context().newCDPSession(page);
+        try {
+          await cdp.send('Emulation.setTouchEmulationEnabled', {
+            enabled: true,
+            maxTouchPoints: 1,
+          });
+          await page.setViewportSize({ width: 320, height: 700 });
+          await eventually(() => ui((r) => r.dataset.size), 'narrow', 'narrow at 320px');
+          assert.equal(
+            await page.evaluate(() => matchMedia('(pointer: coarse)').matches),
+            true,
+            'touch emulation gives a coarse pointer',
+          );
+          const fit = await ui((r) => {
+            const root = r.getBoundingClientRect();
+            const btns = [...r.querySelectorAll('.agg-actions .agg-btn')].map((b) =>
+              b.getBoundingClientRect(),
+            );
+            return {
+              count: btns.length,
+              inside: btns.every((b) => b.left >= root.left && b.right <= root.right),
+              minSize: Math.min(...btns.map((b) => b.width)),
+            };
+          });
+          assert.equal(fit.count, 7, 'all seven header buttons are rendered');
+          assert.equal(fit.inside, true, 'every header button fits inside the overlay at 320px');
+          assert.ok(fit.minSize >= 36, `touch targets stay at least 36px (${fit.minSize})`);
+        } finally {
+          await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+          await cdp.detach();
+          await page.setViewportSize({ width: 1440, height: 900 });
+        }
+      } finally {
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('themeId'));
+      }
+    },
+  );
+
+  await step(
     'animation toggle: remembered in extension storage, not in github.com localStorage (old value migrated)',
     async () => {
       const LEGACY = 'agg:animation-off';

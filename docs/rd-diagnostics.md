@@ -12,7 +12,7 @@ pnpm start --repo /absolute/path/to/repo
 
 一條命令會啟動 localhost web 與唯讀 Git 查詢。Git 必須支援 `--no-lazy-fetch`；啟動時以能力探測確認，不能保證安全讀取時拒絕查詢。關閉終端機前按 Ctrl-C。原有 `AGG_REPO_DIR`、`AGG_REPO_ROOTS`、`AGG_LOCAL_REPOS_FILE` 設定仍可用。
 
-1. 選 repo，開啟「唯讀診斷」。
+1. 選 repo，開啟「比較與變更」。
 2. 選 base／head，按「比較」。文字 ref 在查詢開始時解析成 SHA；PR 的 base／head 使用已取得的固定 SHA。
 3. 核對雙向獨有 commit 數、祖先關係與每個結果的完整性。
 4. 點檔案讀取 diff；選 commit 可讀取 `parent → commit` 的變更。
