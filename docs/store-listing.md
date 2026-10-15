@@ -30,6 +30,7 @@ Adorable Git Graph turns the history of any GitHub repository into a friendly, a
 • Search by message, author, SHA, branch or tag; focus a single branch and see how far ahead it is.
 • Click a commit for the full message, parents / children, which branches contain it, and a link to GitHub.
 • Scroll to the bottom to load older history. Follows GitHub's light / dark mode. Works on phones and desktops.
+• Three themes to switch between: Candy, Hacker imp and Halloween pumpkin.
 • Keyboard friendly: j / k / ↑ / ↓, Home / End, / to search, Esc to close.
 
 Read-only and private by design:
@@ -51,6 +52,7 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
 • 可依訊息、作者、SHA、branch、tag 搜尋；聚焦單一 branch，看它領先幾個 commit。
 • 點 commit 看完整訊息、parent / child、包含它的 branch，以及在 GitHub 開啟。
 • 捲到底載入更早的歷史；跟隨 GitHub 的淺色 / 深色模式；手機與桌機都能用。
+• 三種主題可切換：糖果、駭客小惡魔、萬聖節南瓜。
 • 鍵盤操作：j / k / ↑ / ↓、Home / End、/ 搜尋、Esc 關閉。
 
 唯讀、重視隱私：

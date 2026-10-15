@@ -4,9 +4,13 @@ import { App } from './App';
 import { ANIMATION_OFF_KEY } from './useAnimationOff';
 import { DETAIL_SIZE_KEY } from './useDetailSize';
 import { preloadExtensionSettings } from './useExtensionSetting';
+import { THEME_ID_KEY } from './useThemeId';
 import overlayCss from './styles.css?inline';
-// The extension ships only the default theme, inlined with the structure styles.
-import themeCss from '@adorable/graph-ui/themes/candy.css?inline';
+// 三個主題的樣式都 inline 進 content script（extension 不能像 web 一樣按需載入外部 CSS）；
+// 每個主題的樣式都限定在 [data-theme-id='<id>']，同時存在不會互相影響。
+import candyCss from '@adorable/graph-ui/themes/candy.css?inline';
+import hackerCss from '@adorable/graph-ui/themes/hacker.css?inline';
+import halloweenCss from '@adorable/graph-ui/themes/halloween.css?inline';
 
 const HOST_ID = 'adorable-git-graph-host';
 
@@ -18,7 +22,7 @@ function mount() {
   host.id = HOST_ID;
   const shadow = host.attachShadow({ mode: 'open' });
 
-  const css = `${overlayCss}\n${viewerCss}\n${themeCss}`;
+  const css = [overlayCss, viewerCss, candyCss, hackerCss, halloweenCss].join('\n');
   try {
     // constructable stylesheet 不受頁面 CSP style-src 影響
     const sheet = new CSSStyleSheet();
@@ -43,7 +47,7 @@ function mount() {
   // overlay 的偏好設定先讀好再 render：第一次打開就是存過的值（「關閉動畫」不會先播一段動畫）。
   // storage 沒回應也不能讓浮動按鈕一直不出現，最多等 1 秒。
   const ready = Promise.race([
-    preloadExtensionSettings([ANIMATION_OFF_KEY, DETAIL_SIZE_KEY]),
+    preloadExtensionSettings([ANIMATION_OFF_KEY, DETAIL_SIZE_KEY, THEME_ID_KEY]),
     new Promise<void>((resolve) => setTimeout(resolve, 1000)),
   ]);
   void ready.then(() => createRoot(app).render(<App />));

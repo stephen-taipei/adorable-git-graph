@@ -61,8 +61,8 @@ const wording = {
   none: ['完整清單沒有項目。', 'No entries in the complete list.'],
   incomplete: ['此清單不足以判定沒有變更。', 'This list cannot establish absence of changes.'],
   disabled: [
-    '此來源只提供快照；診斷查詢無法使用。',
-    'This source provides a snapshot only; diagnostics are unavailable.',
+    '此來源只提供快照，無法查詢比較與變更。',
+    'This source provides a snapshot only; compare & changes are unavailable.',
   ],
   textMissing: [
     '未取得文字 patch。可能是 binary、大型檔案或來源未提供。',

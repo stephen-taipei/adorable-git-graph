@@ -4,11 +4,13 @@ import type { TabCommand } from '../shared/messages';
 import { Fab } from './Fab';
 import { Overlay } from './Overlay';
 import { repoStore } from './repoStore';
+import { useThemeId } from './useThemeId';
 
 export function App() {
   const repo = useSyncExternalStore(repoStore.subscribe, repoStore.getSnapshot);
   const [open, setOpen] = useState(false);
   const [epoch, setEpoch] = useState(0);
+  const [themeId, setThemeId] = useThemeId();
   const wasOpen = useRef(false);
   useEffect(() => {
     if (wasOpen.current && !open)
@@ -33,8 +35,14 @@ export function App() {
   if (!repo) return null;
   const label = detectLocale() === 'zh-TW' ? '開啟 Git Graph' : 'Open Git Graph';
   return open ? (
-    <Overlay repo={repo} onClose={close} epoch={epoch} />
+    <Overlay
+      repo={repo}
+      onClose={close}
+      epoch={epoch}
+      themeId={themeId}
+      onThemeIdChange={setThemeId}
+    />
   ) : (
-    <Fab label={label} onClick={() => setOpen(true)} />
+    <Fab label={label} themeId={themeId} onClick={() => setOpen(true)} />
   );
 }
