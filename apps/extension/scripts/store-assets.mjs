@@ -137,13 +137,18 @@ try {
   let detailRow = pinned ? rows.findIndex((r) => r.sha.startsWith(pinned)) : -1;
   if (pinned && detailRow < 0) throw new Error(`--detail ${pinned}: not in the first rows`);
   if (detailRow < 0) {
+    if (candidates.length === 0) {
+      throw new Error(
+        'no commit in the first 15 rows fits the detail screenshot (all merges / reverts); pass --detail <sha>',
+      );
+    }
     const lines = [];
     for (const c of candidates) {
       await select(c.i);
       lines.push({ i: c.i, n: await messageLines() });
     }
     detailRow =
-      lines.find((l) => l.n === 0)?.i ?? lines.find((l) => l.n <= 3)?.i ?? candidates[0]?.i ?? 3;
+      lines.find((l) => l.n === 0)?.i ?? lines.find((l) => l.n <= 3)?.i ?? candidates[0].i;
   }
   await select(detailRow);
   console.log(`detail screenshot: ${rows[detailRow]?.sha.slice(0, 7)} ${rows[detailRow]?.subject}`);
