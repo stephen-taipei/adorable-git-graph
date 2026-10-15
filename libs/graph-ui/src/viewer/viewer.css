@@ -1334,6 +1334,15 @@
   .agg-search .agg-mini-icon {
     margin-block: -8px;
   }
+  /* 手機寬度：標題列按鈕（extension 有 7 顆）在 320px 也要放得下，不能把關閉鈕擠出畫面 */
+  .agg-root[data-size='narrow'] .agg-actions {
+    gap: 3px;
+    padding: 4px;
+  }
+  .agg-root[data-size='narrow'] .agg-actions .agg-btn {
+    width: 36px;
+    height: 36px;
+  }
   .agg-sha {
     min-height: 34px;
     padding: 4px 10px;

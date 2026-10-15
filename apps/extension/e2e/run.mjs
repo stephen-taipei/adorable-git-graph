@@ -2250,7 +2250,7 @@ try {
   );
 
   await step(
-    'theme switch: cycles candy → hacker → halloween, restyles overlay and FAB, remembered in extension storage',
+    'theme switch: cycles candy → hacker → halloween, restyles overlay and FAB, remembered in extension storage, header fits at 320px touch',
     async () => {
       const LABELS = {
         candy: /^(主題：糖果（點一下切換）|Theme: Candy \(click to switch\))$/,
@@ -2314,6 +2314,40 @@ try {
         await switcher().click();
         await eventually(rootTheme, 'candy', 'wraps around to candy');
         await eventually(stored, 'candy', 'candy saved too');
+
+        // 320px 觸控（按鈕變 42px）：多了主題鈕，標題列按鈕仍要整排放得下，關閉鈕不能被裁掉
+        const cdp = await page.context().newCDPSession(page);
+        try {
+          await cdp.send('Emulation.setTouchEmulationEnabled', {
+            enabled: true,
+            maxTouchPoints: 1,
+          });
+          await page.setViewportSize({ width: 320, height: 700 });
+          await eventually(() => ui((r) => r.dataset.size), 'narrow', 'narrow at 320px');
+          assert.equal(
+            await page.evaluate(() => matchMedia('(pointer: coarse)').matches),
+            true,
+            'touch emulation gives a coarse pointer',
+          );
+          const fit = await ui((r) => {
+            const root = r.getBoundingClientRect();
+            const btns = [...r.querySelectorAll('.agg-actions .agg-btn')].map((b) =>
+              b.getBoundingClientRect(),
+            );
+            return {
+              count: btns.length,
+              inside: btns.every((b) => b.left >= root.left && b.right <= root.right),
+              minSize: Math.min(...btns.map((b) => b.width)),
+            };
+          });
+          assert.equal(fit.count, 7, 'all seven header buttons are rendered');
+          assert.equal(fit.inside, true, 'every header button fits inside the overlay at 320px');
+          assert.ok(fit.minSize >= 36, `touch targets stay at least 36px (${fit.minSize})`);
+        } finally {
+          await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+          await cdp.detach();
+          await page.setViewportSize({ width: 1440, height: 900 });
+        }
       } finally {
         await closeOverlay();
         await sw.evaluate(() => chrome.storage.local.remove('themeId'));
