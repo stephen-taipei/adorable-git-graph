@@ -125,3 +125,9 @@
     animation: none;
   }
 }
+
+/* 主題鈕是 emoji：比線條圖示大一點才看得出是什麼（web 版同樣是 16px 以上） */
+.agg-theme-switch {
+  font-size: 18px;
+  line-height: 1;
+}

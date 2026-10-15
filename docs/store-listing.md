@@ -66,12 +66,12 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
 
 **圖片**（`apps/extension/store-assets/`）
 
-| 檔案                                               | 用途                                                     |
-| -------------------------------------------------- | -------------------------------------------------------- |
-| `screenshot-1-graph.png` … `screenshot-4-dark.png` | 1280×800 截圖（Chrome 至少 1 張、最多 5 張；AMO 也可用） |
-| `promo-small-440x280.png`                          | Chrome 小型宣傳圖（必填）                                |
-| `promo-marquee-1400x560.png`                       | Chrome marquee 宣傳圖（選填）                            |
-| `libs/extension-core/assets/icons/icon-128.png`    | 商店圖示 128×128                                         |
+| 檔案                                                | 用途                                                     |
+| --------------------------------------------------- | -------------------------------------------------------- |
+| `screenshot-1-graph.png` … `screenshot-5-theme.png` | 1280×800 截圖（Chrome 至少 1 張、最多 5 張；AMO 也可用） |
+| `promo-small-440x280.png`                           | Chrome 小型宣傳圖（必填）                                |
+| `promo-marquee-1400x560.png`                        | Chrome marquee 宣傳圖（選填）                            |
+| `libs/extension-core/assets/icons/icon-128.png`     | 商店圖示 128×128                                         |
 
 ## 2. Chrome Web Store
 
