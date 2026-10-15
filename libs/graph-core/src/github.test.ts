@@ -92,6 +92,74 @@ describe('fetchGitHubGraph', () => {
     expect(g.commits[0]).toMatchObject({ authorLogin: 'a', message: 'commit 4' });
   });
 
+  describe('when the first /branches page is full', () => {
+    const json = (b: unknown) => () => new Response(JSON.stringify(b), { status: 200 });
+    // 100 條不相干的 branch，main / feat/x 都不在第一頁；'feat' 在第一頁（較短的前綴陷阱）
+    const firstPage = [
+      { name: 'feat', commit: { sha: sha(1) } },
+      ...Array.from({ length: 99 }, (_, i) => ({ name: `z-${i}`, commit: { sha: sha(1) } })),
+    ];
+    const refs = (names: [string, number][]) =>
+      json(
+        names.map(([n, i]) => ({
+          ref: `refs/heads/${n}`,
+          object: { sha: sha(i), type: 'commit' },
+        })),
+      );
+
+    it('looks up the default branch and the browsed branch directly', async () => {
+      const { impl, calls } = fakeApi({
+        '/repos/o/r/branches': json(firstPage),
+        '/repos/o/r/git/matching-refs/heads/main': refs([
+          ['main', 4],
+          ['main-old', 1],
+        ]),
+        '/repos/o/r/git/matching-refs/heads/feat': refs([
+          ['feat', 1],
+          ['feat/x', 3],
+        ]),
+      });
+      const g = await fetchGitHubGraph('o', 'r', {
+        fetchImpl: impl,
+        maxBranches: 2,
+        branchHint: 'feat/x/README.md',
+      });
+      expect(g.refs.filter((r) => r.kind === 'branch')).toEqual([
+        { name: 'main', sha: sha(4), kind: 'branch', isDefault: true },
+        { name: 'feat/x', sha: sha(3), kind: 'branch', isDefault: false },
+      ]);
+      expect(g.coverage?.refs.reasons).toContain('branch_page_limit');
+      expect(calls.filter((c) => c.includes('matching-refs'))).toHaveLength(2);
+    });
+
+    it('skips the hint lookup when the first page already matches the whole path', async () => {
+      const { impl, calls } = fakeApi({
+        '/repos/o/r/branches': json(firstPage),
+        '/repos/o/r/git/matching-refs/heads/main': refs([['main', 4]]),
+      });
+      await fetchGitHubGraph('o', 'r', { fetchImpl: impl, branchHint: 'feat' });
+      expect(calls.filter((c) => c.includes('matching-refs'))).toEqual([
+        '/repos/o/r/git/matching-refs/heads/main',
+      ]);
+    });
+
+    it('still renders when the direct lookup fails', async () => {
+      const { impl } = fakeApi({
+        '/repos/o/r/branches': json(firstPage),
+        '/repos/o/r/git/matching-refs/heads/main': () => new Response('{}', { status: 500 }),
+      });
+      const g = await fetchGitHubGraph('o', 'r', { fetchImpl: impl, maxBranches: 1 });
+      expect(g.refs.filter((r) => r.kind === 'branch').map((r) => r.name)).toEqual(['feat']);
+      expect(g.coverage?.refs.reasons).toContain('branch_page_limit');
+    });
+  });
+
+  it('does not spend extra requests when the branch list fits on one page', async () => {
+    const { impl, calls } = fakeApi();
+    await fetchGitHubGraph('o', 'r', { fetchImpl: impl, branchHint: 'nope/README.md' });
+    expect(calls.some((c) => c.includes('matching-refs'))).toBe(false);
+  });
+
   it('rejects malformed repo names before touching the network', async () => {
     const { impl, calls } = fakeApi();
     await expect(fetchGitHubGraph('o', '../etc', { fetchImpl: impl })).rejects.toMatchObject({
