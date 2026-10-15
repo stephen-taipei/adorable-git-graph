@@ -16,7 +16,7 @@ import type { Locale } from '../i18n';
 import { copyText } from './format';
 
 const wording = {
-  title: ['唯讀診斷', 'Read-only diagnostics'],
+  title: ['比較與變更', 'Compare & changes'],
   graph: ['圖形涵蓋範圍', 'Graph coverage'],
   source: ['來源', 'Source'],
   refs: ['Refs', 'Refs'],
@@ -77,8 +77,8 @@ const wording = {
   binary: ['Binary', 'Binary'],
   draft: ['草稿', 'Draft'],
   fullSha: ['固定 SHA', 'Pinned SHA'],
-  open: ['開啟診斷', 'Open diagnostics'],
-  close: ['收合診斷', 'Close diagnostics'],
+  open: ['開啟比較與變更', 'Open compare & changes'],
+  close: ['收合比較與變更', 'Close compare & changes'],
 } as const;
 type Key = keyof typeof wording;
 const tr = (loc: Locale, key: Key) => wording[key][loc === 'zh-TW' ? 0 : 1];
