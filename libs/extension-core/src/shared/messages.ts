@@ -72,9 +72,6 @@ let watching = false;
  * port 可以在 pagehide 時主動斷開（回應不會再送進來），回到頁面（pageshow persisted）再把沒完成的請求重送一次。
  */
 export function sendToBackground<R extends BgResponse>(req: BgRequest): Promise<R> {
-  // 開設定頁要靠使用者這次點擊：Firefox 只有 runtime.sendMessage 會把「正在處理使用者操作」帶進 background 的
-  // listener（port 訊息不會），少了它 openOptionsPage 開不出分頁。這個請求不等資料，換頁時也沒有東西會卡住。
-  if (req.type === 'open-options') return chrome.runtime.sendMessage(req) as Promise<R>;
   return new Promise<R>((resolve, reject) => {
     const call: Call = { req, port: null, resolve: resolve as (res: never) => void, reject };
     pending.add(call);
