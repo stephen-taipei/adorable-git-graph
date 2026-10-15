@@ -390,6 +390,44 @@ export async function openExtensionPage(browser, uuid, path) {
   return page;
 }
 
+/** 每個瀏覽器視窗裡的分頁：網址與是否為目前選取的分頁（從瀏覽器 UI 讀，不經過 puppeteer 的 target）。 */
+const browserTabs = (browser) =>
+  chromeEval(browser, () =>
+    [...Services.wm.getEnumerator('navigator:browser')].flatMap((w) =>
+      w.gBrowser.tabs.map((t) => ({ url: t.linkedBrowser.currentURI.spec, selected: t.selected })),
+    ),
+  );
+
+/**
+ * 執行 `action`，等它開出並選取一個新的 moz-extension://<uuid>/<path> 分頁，回傳一個可以操作這一頁的 page。
+ * runtime.openOptionsPage 開出的 extension 分頁不會觸發 puppeteer 的 targetcreated（Firefox 157 實測：分頁在 gBrowser 裡、
+ * 也被選取，puppeteer 卻沒有可用的 page），所以從瀏覽器 UI 確認分頁真的開了，把它關掉，再用 openExtensionPage 開同一頁來操作。
+ */
+export async function extensionTabFrom(browser, uuid, path, action, timeout = 10000) {
+  const want = `moz-extension://${uuid}/${path}`;
+  const opened = (tabs) => tabs.filter((t) => t.url === want).length;
+  const before = opened(await browserTabs(browser));
+  await action();
+  const start = Date.now();
+  for (;;) {
+    const tabs = await browserTabs(browser);
+    if (opened(tabs) > before && tabs.some((t) => t.selected && t.url === want)) break;
+    if (Date.now() - start > timeout)
+      throw new Error(`no selected ${want} tab within ${timeout}ms; tabs: ${JSON.stringify(tabs)}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await chromeEval(
+    browser,
+    (u) => {
+      for (const w of Services.wm.getEnumerator('navigator:browser'))
+        for (const t of [...w.gBrowser.tabs])
+          if (t.linkedBrowser.currentURI.spec === u) w.gBrowser.removeTab(t);
+    },
+    want,
+  );
+  return openExtensionPage(browser, uuid, path);
+}
+
 /**
  * background（event page）的 window 控制代碼；需要先有一個 extension 頁面（例如 options）。
  * 用法：`bg.evaluate((w, ...a) => …, ...a)` — callback 跑在 extension 頁面的 realm，但拿到的 `w` 是 background 的 window（同源），

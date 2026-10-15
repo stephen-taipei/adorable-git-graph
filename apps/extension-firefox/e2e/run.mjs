@@ -53,6 +53,7 @@ import {
   dataCollectionConsent,
   clickToolbarButton,
   extensionConsoleErrors,
+  extensionTabFrom,
   fillExt,
   findFirefox,
   launchFirefox,
@@ -2230,9 +2231,9 @@ try {
     'the settings button opens the options page; saving a token is sent only as a Bearer header',
     async () => {
       await openOverlay();
-      const opt = await newTabFrom(browser, () => button(L.settings));
-      const url = await waitForTabUrl(opt, /^moz-extension:\/\//);
-      assert.equal(url, `moz-extension://${EXT_UUID}/options.html`);
+      const opt = await extensionTabFrom(browser, EXT_UUID, 'options.html', () =>
+        button(L.settings),
+      );
       await opt.waitForFunction(() => document.readyState === 'complete');
       await fillExt(opt, 'input[type="password"]', 'github_pat_e2e_secret');
       // 沒有「驗證資訊」的資料收集同意（manifest 的 optional authenticationInfo）：token 不儲存
