@@ -3,6 +3,7 @@
 //   screenshot-2-detail.png      1280×800  點開一個 commit 的詳情
 //   screenshot-3-search.png      1280×800  搜尋（不符合的列淡化）
 //   screenshot-4-dark.png        1280×800  夜間（跟隨 GitHub / 系統的深色模式）
+//   screenshot-5-theme.png       1280×800  切換成「駭客小惡魔」主題（夜間）
 //   promo-small-440x280.png      Chrome 小型宣傳圖（必填）
 //   promo-marquee-1400x560.png   Chrome marquee 宣傳圖（選填）
 // 用法（在自己的電腦上，需要連得到 github.com）：
@@ -94,8 +95,29 @@ try {
   await open();
   await shot('screenshot-1-graph.png');
 
-  await page.locator('.agg-commit').nth(3).click();
-  await page.locator('.agg-detail').waitFor();
+  // 詳情：挑內文短的一般 commit（沒有內文或 4 行以內）；原樣換行的長內文在截圖裡斷句很怪
+  const messageLines = () =>
+    page
+      .locator('.agg-detail-message')
+      .evaluateAll((els) => (els[0] ? els[0].textContent.trim().split('\n').length : 0));
+  const rows = Math.min(await page.locator('.agg-commit').count(), 15);
+  let picked = false;
+  let last = -1;
+  for (let i = 1; i < rows && !picked; i++) {
+    last = i;
+    await page.locator('.agg-commit').nth(i).click();
+    await page.locator('.agg-detail').waitFor();
+    const row = page.locator('.agg-commit').nth(i);
+    const merge = await row.locator('.agg-merge').count();
+    // Revert / Merge 這類自動產生的訊息不適合當展示
+    const auto = /\b(Revert "|Merge (pull request|branch))/.test(await row.innerText());
+    picked = !merge && !auto && (await messageLines()) <= 4;
+  }
+  // 都不合適：退回第 4 列（再點一次已選的列會收起詳情，所以先換到別列）
+  if (!picked && last !== 3) {
+    await page.locator('.agg-commit').nth(3).click();
+    await page.locator('.agg-detail').waitFor();
+  }
   await page.waitForTimeout(600);
   await page.mouse.move(2, 2);
   await shot('screenshot-2-detail.png');
@@ -113,6 +135,13 @@ try {
   await page.evaluate(() => document.documentElement.setAttribute('data-color-mode', 'dark'));
   await page.waitForTimeout(800);
   await shot('screenshot-4-dark.png');
+
+  // 主題：糖果 → 駭客小惡魔（存在 extension storage；結束時整個 profile 會刪掉）
+  await page.locator('.agg-theme-switch').click();
+  await page.locator('.agg-root[data-theme-id="hacker"]').waitFor();
+  await page.waitForTimeout(800);
+  await page.mouse.move(2, 2);
+  await shot('screenshot-5-theme.png');
 
   // 宣傳圖：圖示 + 名稱 + 一句話 + 第一張截圖的局部
   const icon = readFileSync(
