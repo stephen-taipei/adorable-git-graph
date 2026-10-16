@@ -1,5 +1,5 @@
-import { EVENTS_ENDPOINT, HMR_EVENT } from './protocol';
-import type { SnapshotEvent } from './protocol';
+import { EVENTS_ENDPOINT, HMR_EVENT } from '@adorable/git-local/protocol';
+import type { SnapshotEvent } from '@adorable/git-local/protocol';
 import { HAS_SERVER } from './runtime';
 
 /**
