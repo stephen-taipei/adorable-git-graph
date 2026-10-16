@@ -1,4 +1,4 @@
-// `npx adorable-git-graph`：不需要 Vite 的獨立 server。
+// `npx @stephen.taipei/adorable-git-graph`：不需要 Vite 的獨立 server。
 // 提供預先建置好的畫面（dist/web，以 VITE_AGG_SERVER=1 建置：不含任何 git 歷史），
 // 與 `pnpm start` 相同的本機 repo endpoint（共用 libs/git-local，即 @adorable/git-local），即時更新改用 SSE。
 // 只綁 127.0.0.1；Host / Origin 檢查與 dev server 相同（DNS rebinding、其他 localhost 埠的頁面都讀不到）。

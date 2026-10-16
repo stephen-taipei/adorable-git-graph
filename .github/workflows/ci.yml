@@ -46,7 +46,7 @@ jobs:
         suite:
           - { name: chrome-extension, filter: '@adorable/extension' }
           - { name: web, filter: '@adorable/web' }
-          - { name: cli, filter: 'adorable-git-graph' }
+          - { name: cli, filter: './apps/cli' }
     name: e2e (${{ matrix.suite.name }})
     steps:
       - uses: actions/checkout@v4

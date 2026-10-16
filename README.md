@@ -7,7 +7,7 @@
 An animated, three.js git graph for GitHub repositories and your local repos: every commit is a little ball with a face, every branch a flowing pipe. Read-only, no server of ours.
 
 [![Version](https://img.shields.io/badge/version-0.1.0-2563EB?style=flat-square)](package.json)
-[![npm](https://img.shields.io/npm/v/adorable-git-graph?style=flat-square&color=CB3837)](https://www.npmjs.com/package/adorable-git-graph)
+[![npm](https://img.shields.io/npm/v/@stephen.taipei/adorable-git-graph?style=flat-square&color=CB3837)](https://www.npmjs.com/package/@stephen.taipei/adorable-git-graph)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3_%E2%89%A5116-4285F4?style=flat-square)](#chrome-extension)
 [![Firefox](https://img.shields.io/badge/Firefox-MV3_%E2%89%A5140-FF7139?style=flat-square)](#firefox-add-on)
 [![License](https://img.shields.io/badge/license-Apache--2.0-64748B?style=flat-square)](LICENSE)
@@ -25,11 +25,11 @@ An animated, three.js git graph for GitHub repositories and your local repos: ev
 
 Adorable Git Graph draws a repository's history as a `git log --graph` style list, newest on top, with a cartoon graph next to it. It comes in three forms that share one UI:
 
-| Form                                  | Where it runs                              | Reads from                         |
-| ------------------------------------- | ------------------------------------------ | ---------------------------------- |
-| [Chrome extension](#chrome-extension) | A button on any github.com repository page | GitHub REST API                    |
-| [Firefox add-on](#firefox-add-on)     | Same as Chrome, same source code           | GitHub REST API                    |
-| [`npx adorable-git-graph`](#npm-cli)  | `localhost` in your browser                | Local `git` (plus any GitHub repo) |
+| Form                                                 | Where it runs                              | Reads from                         |
+| ---------------------------------------------------- | ------------------------------------------ | ---------------------------------- |
+| [Chrome extension](#chrome-extension)                | A button on any github.com repository page | GitHub REST API                    |
+| [Firefox add-on](#firefox-add-on)                    | Same as Chrome, same source code           | GitHub REST API                    |
+| [`npx @stephen.taipei/adorable-git-graph`](#npm-cli) | `localhost` in your browser                | Local `git` (plus any GitHub repo) |
 
 - Commits are balls whose face follows the commit type: `feat` laughs, `fix` sweats, merges are bigger, the root sprouts, the tip of the default branch wears a crown.
 - Each row shows branch / tag / HEAD labels, merge marks, conventional-commit type, author, date and short SHA (click to copy).
@@ -69,7 +69,7 @@ For your local repositories, no clone of this project needed. Requires Node.js 2
 
 ```bash
 cd your-repo
-npx adorable-git-graph
+npx @stephen.taipei/adorable-git-graph
 ```
 
 - **Live:** commit, switch branches or fetch in your terminal, and new commits pop in without a reload.
@@ -155,7 +155,7 @@ apps/
   web/                 Vite + React app behind pnpm start
   extension/           Chrome MV3 build entry, icons, e2e
   extension-firefox/   Firefox MV3 build entry, web-ext lint / package, e2e
-  cli/                 npm package adorable-git-graph
+  cli/                 npm package @stephen.taipei/adorable-git-graph
 libs/
   extension-core/      Shared extension: background, content script, options page, manifest
   graph-core/          Pure TS: types, lane layout, GitHub client, git log parser
