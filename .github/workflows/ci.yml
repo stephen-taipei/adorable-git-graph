@@ -34,3 +34,35 @@ jobs:
         with:
           name: firefox-addon
           path: apps/extension-firefox/web-ext-artifacts/*.zip
+
+  # 真實瀏覽器端到端：mock GitHub API + 暫時 git repo，不碰網路。Linux 上用 playwright-core 對應版本的 Chromium
+  # （Google Chrome 正式版 137 起忽略 --load-extension）。Firefox e2e 需要真正的 Firefox，仍在本機跑（見 docs/development.md）。
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - { name: chrome-extension, filter: '@adorable/extension' }
+          - { name: web, filter: '@adorable/web' }
+          - { name: cli, filter: 'adorable-git-graph' }
+    name: e2e (${{ matrix.suite.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @adorable/extension exec playwright-core install --with-deps chromium
+      - run: pnpm --filter '${{ matrix.suite.filter }}' e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.suite.name }}
+          path: |
+            apps/*/e2e/.artifacts/**/*.png
+            apps/web/e2e/.artifacts/diagnostics/**
+          if-no-files-found: ignore

@@ -1,6 +1,6 @@
 // npm 套件的建置：
 //   dist/web/       畫面（apps/web，以 VITE_AGG_SERVER=1 建置：不烤 git 快照，改向 server 要、以 SSE 收更新）
-//   dist/server.mjs server（src/server.ts + apps/web/plugins/git-snapshot.ts + graph-core 打成單一檔案，零 runtime 相依）
+//   dist/server.mjs server（src/server.ts + libs/git-local + graph-core 打成單一檔案，零 runtime 相依）
 //   LICENSE         從 repo 根目錄複製（npm 只收套件資料夾裡的檔案）
 import { copyFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

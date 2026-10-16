@@ -12,6 +12,7 @@
     "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
+    "@adorable/git-local": "workspace:*",
     "@adorable/graph-core": "workspace:*",
     "@adorable/graph-ui": "workspace:*",
     "react": "^19.3.0",

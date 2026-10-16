@@ -20,6 +20,9 @@ importers:
 
   apps/cli:
     devDependencies:
+      '@adorable/git-local':
+        specifier: workspace:*
+        version: link:../../libs/git-local
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.5
@@ -55,6 +58,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@adorable/git-local':
+        specifier: workspace:*
+        version: link:../../libs/git-local
       '@adorable/graph-core':
         specifier: workspace:*
         version: link:../../libs/graph-core
@@ -123,6 +129,19 @@ importers:
       vite:
         specifier: ^8.3.2
         version: 8.3.2(@types/node@22.20.5)(yaml@2.9.0)
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@22.20.5)(vite@8.3.2(@types/node@22.20.5)(yaml@2.9.0))
+
+  libs/git-local:
+    dependencies:
+      '@adorable/graph-core':
+        specifier: workspace:*
+        version: link:../graph-core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
       vitest:
         specifier: ^5.0.3
         version: 5.0.3(@types/node@22.20.5)(vite@8.3.2(@types/node@22.20.5)(yaml@2.9.0))
