@@ -89,6 +89,10 @@ const reasonLabels: Record<string, [string, string]> = {
   display_window: ['圖形顯示範圍有限', 'Display window'],
   branch_selection: ['只載入選取分支', 'Selected branches only'],
   branch_page_limit: ['分支清單可能超過一頁', 'Branch page limit'],
+  default_branch_unavailable: [
+    '找不到預設分支，圖中沒有主線',
+    'Default branch not found; the main line is missing',
+  ],
   tag_page_limit: ['Tag 清單可能超過一頁', 'Tag page limit'],
   tags_unavailable: ['Tag 查詢失敗，無法確認完整清單', 'Tag query failed; full list unknown'],
   tags_outside_history: ['Tag 可能位於已載入歷史之外', 'Tags outside loaded history'],
