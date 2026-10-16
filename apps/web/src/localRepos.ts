@@ -1,5 +1,10 @@
-import { MAX_DEPTH, REPOS_ENDPOINT, SNAPSHOT_ENDPOINT, isRepoId } from './protocol';
-import type { GitSnapshot, LocalRepo, ReposResponse } from './protocol';
+import {
+  MAX_DEPTH,
+  REPOS_ENDPOINT,
+  SNAPSHOT_ENDPOINT,
+  isRepoId,
+} from '@adorable/git-local/protocol';
+import type { GitSnapshot, LocalRepo, ReposResponse } from '@adorable/git-local/protocol';
 
 /**
  * dev server 的本機 repo API（只有 `pnpm start` 時存在；靜態建置不會呼叫）。

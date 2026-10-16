@@ -1,5 +1,5 @@
 import { isValidRepoSegment, parseGitHubRemote } from '@adorable/graph-core';
-import { DEFAULT_REPO, isRepoId } from './protocol';
+import { DEFAULT_REPO, isRepoId } from '@adorable/git-local/protocol';
 
 /** `local.id`：dev server 清單裡的本機 repo（省略 = 啟動時指定的預設 repo）。 */
 export type Source =
