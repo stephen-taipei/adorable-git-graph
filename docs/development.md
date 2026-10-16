@@ -208,7 +208,10 @@ tools/e2e/              e2e 共用：Chrome 偵測、mock GitHub API（含 CORS�
 ## 運作原理
 
 1. **資料**：background 以 GitHub REST API 抓 repo → default branch + 目前瀏覽的 branch + open PR 分支（其餘依序補到上限，預設 5 條），
-   各抓最近 60 筆 commit，以 sha 合併成 DAG，另抓 tags。約 `分支數 + 4` 次請求，結果快取 10 分鐘（`chrome.storage.local`）。
+   各抓最近 60 筆 commit，以 sha 合併成 DAG，另抓 tags。commit 分兩階段抓：先抓 default 與瀏覽中的 branch，
+   其餘 branch 的 head 已經在載入的歷史裡就不再請求（ref 照樣顯示），所以最多 `分支數 + 4` 次請求，
+   常見的「branch 都已合併」情況只要 5–6 次。結果快取 10 分鐘（`chrome.storage.local`）。
+   成功回應的 `x-ratelimit-*` 標頭記在 `GraphData.rateLimit`（不進快取）；剩餘額度偏低時列表上方會提示加入 token。
 2. **佈局**（`graph-core/layout.ts`）：children-first 拓樸排序 → 類 `git log --graph` 的 lane 配置；
    列 = 排序後的位置（0 = 最新）、欄 = lane（default branch 固定在第 0 欄）；每條 lane 有固定顏色；
    邊先沿自己的 lane 垂直走，只在靠近 parent 的一列以 S 曲線轉進它的 lane，避免穿過其他節點。

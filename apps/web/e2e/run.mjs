@@ -10,7 +10,7 @@
 //   · 重新整理保留捲動 / 選取（本機 + GitHub，轉圈中列表不卸載；失敗時錯誤畫面取代列表）
 //   · 即時更新（git commit / 一次進來好幾筆 / branch / checkout / tag / 刪 branch）：不重新整理、只有新的 commit 彈出來、
 //     捲動錨定（捲下去時畫面最上面的 commit 不動、選取不丟、不重播）
-//   · GitHub 來源（輸入驗證、404、rate limit、loading、深連結與快取、token 只以 Bearer header 送出且不進 DOM / URL / 快取）
+//   · GitHub 來源（輸入驗證、404、rate limit、剩餘額度偏低的提示、loading、深連結與快取、token 只以 Bearer header 送出且不進 DOM / URL / 快取）
 //   · 安全性（cross-origin 讀不到 dev endpoint、快照與 bundle 沒有 commit 本文 / email）→ 主題記憶 → zh-TW
 //   · 本機 repo 選擇器（AGG_REPO_ROOTS 指向專用的暫時資料夾：清單內容 / 略過的資料夾 / 不跟隨 symlink、切換與上一頁 / 下一頁、
 //     鍵盤在關著的選單上瀏覽（↑ ↓ 只改顯示，停 ~700ms 才切換一次：一筆歷史、只讀最後那個 repo；Enter 馬上切換）、
@@ -49,10 +49,12 @@ import { chromium } from 'playwright-core';
 import { findChrome } from '../../../tools/e2e/chrome-path.mjs';
 import {
   LONG,
+  RATE_LIMIT_DEFAULT,
   SPECS,
   faults,
   gate,
   isMoreRequest,
+  rateLimit,
   releaseHeld,
   seen,
   sha as mockSha,
@@ -2729,6 +2731,63 @@ try {
       await banner.waitFor({ state: 'detached', timeout: 15_000 * SCALE });
       assert.equal(await scrollerTag(), 'same-element');
       assert.equal(await selectedSha(), pick.sha);
+      await replayDone();
+    },
+  );
+
+  await step(
+    'GitHub API quota hint: hidden while plenty is left; a low remaining quota shows a one-line hint whose "add a token" link opens the token dialog; a cached reload does not show the stale quota',
+    async () => {
+      const hint = page.locator('.agg-banner--quota');
+      try {
+        // 上一步最後一次重新整理拿到的是預設的 59 / 60：不提示
+        assert.equal(await hint.count(), 0, 'no quota hint while plenty is left');
+
+        rateLimit.remaining = 5;
+        await page.getByRole('button', { name: /^(重新整理|Refresh)$/ }).click();
+        await hint.waitFor({ timeout: 15_000 * SCALE });
+        const text = await hint.innerText();
+        assert.match(text, /5 of 60 requests left|剩 5 \/ 60 次/, `quota numbers: ${text}`);
+        assert.match(text, /resets in about \d+ min|約 \d+ 分鐘後恢復/, `reset time: ${text}`);
+        assert.equal(await hint.getAttribute('role'), 'status', 'the hint is not an alert');
+        // 不取代列表：圖與列都還在
+        assert.equal((await domRows()).length, SPECS.length);
+        await page.screenshot({ path: resolve(artifacts, '9b-quota-hint.png') });
+
+        // 「加入 token」打開既有的 token 對話框（不新增任何設定入口）
+        await hint.getByRole('button', { name: /token/i }).click();
+        await page.locator('.web-dialog').waitFor();
+        await page.getByRole('button', { name: /^(取消|Cancel)$/ }).click();
+        await page.locator('.web-dialog').waitFor({ state: 'detached' });
+
+        // cache 命中（重新載入頁面）：不保存抓取當下的額度，所以不會顯示過時的提示
+        const requests = apiCalls().length;
+        await page.reload();
+        await page.locator('.agg-title-text', { hasText: 'demo/adorable-git-graph' }).waitFor();
+        await page.locator('.agg-canvas canvas').waitFor();
+        await waitUntil(
+          async () => (await domRows()).length === SPECS.length,
+          10_000,
+          'graph from the cache',
+        );
+        assert.equal(apiCalls().length, requests, 'the reload is served from the cache');
+        assert.equal(await hint.count(), 0, 'a cached graph carries no quota hint');
+      } finally {
+        Object.assign(rateLimit, RATE_LIMIT_DEFAULT);
+      }
+      // 額度恢復之後再抓一次：提示不會出現
+      const calls = apiCalls().length;
+      await page.getByRole('button', { name: /^(重新整理|Refresh)$/ }).click();
+      await waitUntil(
+        async () =>
+          apiCalls().length > calls &&
+          (await page
+            .getByRole('button', { name: /^(重新整理|Refresh)$/ })
+            .getAttribute('aria-busy')) === null,
+        15_000,
+        'the refresh to finish',
+      );
+      assert.equal(await hint.count(), 0, 'no quota hint once the quota is back');
       await replayDone();
     },
   );

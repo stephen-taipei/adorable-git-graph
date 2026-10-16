@@ -32,6 +32,16 @@ export interface RepoInfo {
   currentBranch?: string;
 }
 
+/** GitHub REST API 的剩餘額度（取自最後一次成功回應的 `x-ratelimit-*` 標頭）。 */
+export interface RateLimitInfo {
+  /** 這個時段內還能呼叫幾次 */
+  remaining: number;
+  /** 這個時段的總額度（未登入 60、有 token 5,000） */
+  limit: number;
+  /** 額度重置時間（ms epoch） */
+  resetAt: number;
+}
+
 export interface GraphData {
   coverage?: GraphCoverage;
   repo: RepoInfo;
@@ -41,6 +51,11 @@ export interface GraphData {
   truncated?: boolean;
   /** 資料取得時間（ms epoch），給 cache 判斷用。 */
   fetchedAt?: number;
+  /**
+   * 這次載入後的 GitHub API 剩餘額度（只有 GitHub 來源、而且回應帶了 rate limit 標頭時才有）。
+   * 是「抓取當下」的值：存進 cache 時要拿掉（見 withoutRateLimit），cache 命中的圖不會有它。
+   */
+  rateLimit?: RateLimitInfo;
 }
 
 export type CommitKind = 'root' | 'merge' | 'feat' | 'fix' | 'revert' | 'docs' | 'chore' | 'normal';
@@ -102,6 +117,7 @@ export interface GraphBranch {
 export interface GraphLayout {
   coverage?: GraphCoverage;
   fetchedAt?: number;
+  rateLimit?: RateLimitInfo;
   repo: RepoInfo;
   /** 由新到舊（列順序）。 */
   nodes: GraphNode[];
