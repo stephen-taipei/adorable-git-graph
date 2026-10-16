@@ -4,7 +4,7 @@
 
 ## 0. 上架前 checklist
 
-- [ ] `main` 已包含要上架的版本；`apps/extension/package.json` 與 `apps/extension-firefox/package.json` 的 `version` 一致（目前 `0.1.0`）
+- [ ] `main` 已包含要上架的版本；`apps/extension/package.json` 與 `apps/extension-firefox/package.json` 的 `version` 一致（目前 `0.1.1`；每次上架都要比商店上的版本大）
 - [ ] Firefox e2e 在 macOS 跑過：`pnpm --filter @adorable/extension-firefox e2e`（雲端容器沒有 Firefox）
 - [ ] Chrome：`pnpm --filter @adorable/extension release` → `apps/extension/release/adorable-git-graph-chrome-<version>.zip`
 - [ ] Firefox：`pnpm --filter @adorable/extension-firefox release` → `web-ext-artifacts/` 的 add-on zip 與 `adorable-git-graph-source.zip`
