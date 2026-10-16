@@ -6,7 +6,7 @@
 
 An animated, three.js git graph for GitHub repositories and your local repos: every commit is a little ball with a face, every branch a flowing pipe. Read-only, no server of ours.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-2563EB?style=flat-square)](package.json)
+[![Release](https://img.shields.io/github/v/release/stephen-taipei/adorable-git-graph?style=flat-square&color=2563EB)](https://github.com/stephen-taipei/adorable-git-graph/releases/latest)
 [![npm](https://img.shields.io/npm/v/@stephen.taipei/adorable-git-graph?style=flat-square&color=CB3837)](https://www.npmjs.com/package/@stephen.taipei/adorable-git-graph)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3_%E2%89%A5116-4285F4?style=flat-square)](#chrome-extension)
 [![Firefox](https://img.shields.io/badge/Firefox-MV3_%E2%89%A5140-FF7139?style=flat-square)](#firefox-add-on)
