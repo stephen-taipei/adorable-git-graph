@@ -4,7 +4,7 @@ Cartoon-style, animated git graph for your **local** repositories, in your brows
 
 ```bash
 cd your-repo
-npx adorable-git-graph
+npx @stephen.taipei/adorable-git-graph
 ```
 
 - Every commit is a little ball with a face; branches are flowing pipes; newest at the top, like `git log --graph`.

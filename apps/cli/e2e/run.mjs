@@ -1,4 +1,4 @@
-// End-to-end：npm 套件（`npx adorable-git-graph`）。
+// End-to-end：npm 套件（`npx @stephen.taipei/adorable-git-graph`）。
 //   · 建置後以 `npm pack` 打包、解開到暫時資料夾，從那裡執行 bin：驗證的是使用者實際拿到的 tarball
 //     （files 清單、零 runtime 相依、不靠 workspace 的 node_modules），而不是 repo 裡的原始碼
 //   · tarball 內容：bin / dist / LICENSE / README；不含原始碼與 e2e；bundle 不含任何 git 歷史（本 repo 或測試 repo）
@@ -6,7 +6,7 @@
 //   · 本機 repo 選單：列出同層的 repo、切換後顯示它的歷史、它的 commit 也即時更新
 //   · 安全性：其他 origin 的頁面讀不到 endpoint / SSE、偽造 Host 403、路徑穿越 404、只綁 127.0.0.1
 //   · CLI：--help / --version / 不認得的選項、SIGINT 正常結束、沒有 console 錯誤
-// 用法：pnpm --filter adorable-git-graph e2e（CHROME_PATH 可指定 Chrome；E2E_SKIP_BUILD=1 沿用現有的 dist）
+// 用法：pnpm --filter ./apps/cli e2e（CHROME_PATH 可指定 Chrome；E2E_SKIP_BUILD=1 沿用現有的 dist）
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

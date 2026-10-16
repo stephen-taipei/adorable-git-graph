@@ -4,13 +4,13 @@
 
 「比較與變更」面板的設計與限制：[RD 診斷文件](rd-diagnostics.md)、[驗證紀錄](rd-validation.md)、[RD 試用方案](rd-pilot.md)。
 
-[npm CLI](#npm-套件npx-adorable-git-graph) · [Web app](#web-apppnpm-start) · [Chrome extension](#chrome-extensionappsextension) · [Firefox extension](#firefox-extensionappsextension-firefox) · [開發與 e2e](#開發與-e2e) · [專案結構](#專案結構) · [運作原理](#運作原理)
+[npm CLI](#npm-套件cli) · [Web app](#web-apppnpm-start) · [Chrome extension](#chrome-extensionappsextension) · [Firefox extension](#firefox-extensionappsextension-firefox) · [開發與 e2e](#開發與-e2e) · [專案結構](#專案結構) · [運作原理](#運作原理)
 
-## npm 套件（`npx adorable-git-graph`）
+## npm 套件（CLI）
 
 ```bash
 cd ~/code/some-repo
-npx adorable-git-graph            # 開啟瀏覽器；也可以 npx adorable-git-graph ~/code/other --port 4300 --no-open
+npx @stephen.taipei/adorable-git-graph            # 開啟瀏覽器；也可以 npx @stephen.taipei/adorable-git-graph ~/code/other --port 4300 --no-open
 ```
 
 與 `pnpm start` 是同一個畫面、同一套本機 repo endpoint（`libs/git-local`（`@adorable/git-local`）的 `serveLocalRepos`），差別：
@@ -22,8 +22,8 @@ npx adorable-git-graph            # 開啟瀏覽器；也可以 npx adorable-git
 - 環境變數與 `pnpm start` 相同（`AGG_MAX_COMMITS`、`AGG_REPO_ROOTS`…）；手動加入的路徑記在 `local-repos-cli.json`。
 
 ```bash
-pnpm --filter adorable-git-graph build   # → apps/cli/dist（web/ + server.mjs）與 LICENSE
-pnpm --filter adorable-git-graph e2e     # npm pack 後從 tarball 執行：內容檢查、即時更新、repo 選單、跨來源 / Host / 路徑穿越
+pnpm --filter ./apps/cli build   # → apps/cli/dist（web/ + server.mjs）與 LICENSE
+pnpm --filter ./apps/cli e2e     # npm pack 後從 tarball 執行：內容檢查、即時更新、repo 選單、跨來源 / Host / 路徑穿越
 cd apps/cli && npm publish               # 發布（prepack 會重新建置）；第一次發布前先 npm pack --dry-run 檢查內容
 ```
 
@@ -188,7 +188,7 @@ apps/
     src/                SourceBar（本機 / GitHub 切換、本機 repo 選單）、TokenDialog、useGraphSource、localRepos
   extension/            Chrome（MV3）：只有建置入口、圖示產生器與 e2e，原始碼都在 libs/extension-core
   extension-firefox/    Firefox（MV3）：建置入口、web-ext 的 lint / package / run、e2e（puppeteer + 真實 Firefox）
-  cli/                  npm 套件 adorable-git-graph：獨立 node:http server（SSE）+ 預先建置的 web 畫面、e2e（npm pack 後執行）
+  cli/                  npm 套件 @stephen.taipei/adorable-git-graph：獨立 node:http server（SSE）+ 預先建置的 web 畫面、e2e（npm pack 後執行）
 libs/
   git-local/            本機 git 執行環境（node 端，web dev server 與 cli 共用）：執行唯讀 git log / 診斷、監看 .git refs、
                         掃描本機 repo、依 id 提供快照的 endpoint 與 Host / 同源檢查；`./protocol` 是瀏覽器也能用的協定

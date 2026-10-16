@@ -7,7 +7,7 @@
 用 three.js 畫的動態 git graph，支援 GitHub repo 與本機 repo：每個 commit 是一顆有表情的小球，每條 branch 是流動的管線。唯讀，沒有我們自己的伺服器。
 
 [![Version](https://img.shields.io/badge/version-0.1.0-2563EB?style=flat-square)](package.json)
-[![npm](https://img.shields.io/npm/v/adorable-git-graph?style=flat-square&color=CB3837)](https://www.npmjs.com/package/adorable-git-graph)
+[![npm](https://img.shields.io/npm/v/@stephen.taipei/adorable-git-graph?style=flat-square&color=CB3837)](https://www.npmjs.com/package/@stephen.taipei/adorable-git-graph)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3_%E2%89%A5116-4285F4?style=flat-square)](#chrome-擴充功能)
 [![Firefox](https://img.shields.io/badge/Firefox-MV3_%E2%89%A5140-FF7139?style=flat-square)](#firefox-附加元件)
 [![License](https://img.shields.io/badge/license-Apache--2.0-64748B?style=flat-square)](LICENSE)
@@ -25,11 +25,11 @@
 
 Adorable Git Graph 把 repo 歷史畫成 `git log --graph` 式的列表（最新在最上面），旁邊是一條卡通線圖。三種形式共用同一套 UI：
 
-| 形式                                  | 在哪裡用                          | 資料來源                             |
-| ------------------------------------- | --------------------------------- | ------------------------------------ |
-| [Chrome 擴充功能](#chrome-擴充功能)   | github.com 任一 repo 頁面上的按鈕 | GitHub REST API                      |
-| [Firefox 附加元件](#firefox-附加元件) | 同 Chrome，同一份原始碼           | GitHub REST API                      |
-| [`npx adorable-git-graph`](#npm-cli)  | 瀏覽器開 `localhost`              | 本機 `git`（也能看任何 GitHub repo） |
+| 形式                                                 | 在哪裡用                          | 資料來源                             |
+| ---------------------------------------------------- | --------------------------------- | ------------------------------------ |
+| [Chrome 擴充功能](#chrome-擴充功能)                  | github.com 任一 repo 頁面上的按鈕 | GitHub REST API                      |
+| [Firefox 附加元件](#firefox-附加元件)                | 同 Chrome，同一份原始碼           | GitHub REST API                      |
+| [`npx @stephen.taipei/adorable-git-graph`](#npm-cli) | 瀏覽器開 `localhost`              | 本機 `git`（也能看任何 GitHub repo） |
 
 - 小球表情依 commit 類型：`feat` 大笑、`fix` 冒汗、merge 比較大顆、root 長嫩芽、default branch 最新 commit 戴皇冠。
 - 每一列有 branch / tag / HEAD 標籤、merge 標記、conventional commit 類型、作者、日期與短 SHA（點一下複製）。
@@ -69,7 +69,7 @@ pnpm --filter @adorable/extension-firefox build   # → apps/extension-firefox/d
 
 ```bash
 cd your-repo
-npx adorable-git-graph
+npx @stephen.taipei/adorable-git-graph
 ```
 
 - **即時更新**：在終端機 commit、切 branch 或 fetch，新的 commit 會直接彈出來，不用重新整理。
@@ -155,7 +155,7 @@ apps/
   web/                 pnpm start 的 Vite + React app
   extension/           Chrome MV3 建置入口、圖示、e2e
   extension-firefox/   Firefox MV3 建置入口、web-ext lint / package、e2e
-  cli/                 npm 套件 adorable-git-graph
+  cli/                 npm 套件 @stephen.taipei/adorable-git-graph
 libs/
   extension-core/      兩個瀏覽器共用：background、content script、設定頁、manifest
   graph-core/          純 TS：型別、lane 配置、GitHub client、git log 解析

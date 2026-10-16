@@ -3,7 +3,7 @@
 _Last updated / 最後更新：2026-10-13_
 
 This policy covers **Adorable Git Graph**: the Chrome extension, the Firefox add-on, and the local web app
-(`npx adorable-git-graph` / `pnpm start`). The source code is public at
+(`npx @stephen.taipei/adorable-git-graph` / `pnpm start`). The source code is public at
 <https://github.com/stephen-taipei/adorable-git-graph>.
 
 [繁體中文版在下方](#繁體中文)
@@ -61,7 +61,7 @@ Questions: open an issue at <https://github.com/stephen-taipei/adorable-git-grap
 ## 繁體中文
 
 本政策適用於 **Adorable Git Graph** 的 Chrome 擴充功能、Firefox 附加元件，以及本機 web app
-（`npx adorable-git-graph` / `pnpm start`）。原始碼公開於 <https://github.com/stephen-taipei/adorable-git-graph>。
+（`npx @stephen.taipei/adorable-git-graph` / `pnpm start`）。原始碼公開於 <https://github.com/stephen-taipei/adorable-git-graph>。
 
 ### 摘要
 

@@ -39,7 +39,7 @@ Read-only and private by design:
 
 Open any repository on github.com and click the Git Graph button (or the toolbar icon).
 Source code (Apache-2.0): https://github.com/stephen-taipei/adorable-git-graph
-Also available for your local repositories: npx adorable-git-graph
+Also available for your local repositories: npx @stephen.taipei/adorable-git-graph
 ```
 
 **說明（繁體中文）**
@@ -61,7 +61,7 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
 
 打開 github.com 上的任一 repo，點右下角的 Git Graph 按鈕（或工具列圖示）即可。
 原始碼（Apache-2.0）：https://github.com/stephen-taipei/adorable-git-graph
-本機 repo 版：npx adorable-git-graph
+本機 repo 版：npx @stephen.taipei/adorable-git-graph
 ```
 
 **圖片**（`apps/extension/store-assets/`）
