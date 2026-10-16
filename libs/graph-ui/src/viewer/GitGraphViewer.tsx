@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode, SetStateAction } from 'react';
-import {
-  aheadCount,
-  branchesContaining,
-  buildReachability,
-  computeStats,
-  isFullSha,
-  matchesQuery,
-  recolorLayout,
-} from '@adorable/graph-core';
+import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import { branchesContaining } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphLayout, GraphNode } from '@adorable/graph-core';
 import { detectLocale, formatDuration, formatRelative, getMessages } from '../i18n';
 import type { Locale } from '../i18n';
@@ -26,17 +18,30 @@ import { ColumnHeader, CommitRow, rowDomId } from './CommitList';
 import { GitGraphCanvas } from './GitGraphCanvas';
 import type { GitGraphCanvasHandle } from './GitGraphCanvas';
 import { HistoryFooter } from './HistoryFooter';
-import { isAppendOnly } from './history';
 import type { HistoryState } from './history';
+import { IconButton } from './IconButton';
 import { Mascot } from './Mascot';
 import { Toolbar } from './Toolbar';
 import { AUTO_SCHEME, DEFAULT_THEME, resolveScheme, themeAppearance } from '../themes/config';
 import type { SchemeSetting, ThemeId } from '../themes/config';
 import type { SceneAppearance } from '../scene/LogGraphScene';
 import { CoverageNotice, DiagnosticsPanel } from './DiagnosticsPanel';
-import type { CommitInspection } from './DiagnosticsPanel';
 import { useElementSize, usePrefersDark, usePrefersReducedMotion } from './hooks';
 import { GearIcon, PlayIcon, RefreshIcon, CloseIcon, TopIcon } from './icons';
+import { useBranchFocus } from './useBranchFocus';
+import { useInspection } from './useInspection';
+import { useSearch } from './useSearch';
+import { useSelection } from './useSelection';
+import { useViewerLayout } from './useViewerLayout';
+import { useAnimationOff, useDetailSize } from './useViewerPrefs';
+import {
+  commitByPrefix,
+  diagnosticsContextKey,
+  isSameFocusContext,
+  readSavedFocus,
+  restoreFocus,
+  writeSavedFocus,
+} from './viewerSession';
 
 export type { HistoryFooterState, HistoryState } from './history';
 
@@ -107,69 +112,7 @@ export interface GitGraphViewerProps {
   diagnostics?: DiagnosticAdapter;
 }
 
-function savedInspection(
-  key?: string,
-): { inspection?: CommitInspection; open: boolean } | undefined {
-  if (!key) return;
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(`agg:inspection:${key}`) ?? 'null');
-    if (!saved || saved.version !== 1 || typeof saved.open !== 'boolean') return;
-    const value = saved.inspection;
-    if (value === undefined) return { open: saved.open };
-    if (
-      !value ||
-      !isFullSha(value.sha) ||
-      (value.repo !== undefined &&
-        (typeof value.repo !== 'string' ||
-          value.repo.length > 256 ||
-          !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repo)))
-    )
-      return;
-    return {
-      open: saved.open,
-      inspection: { sha: value.sha, ...(value.repo ? { repo: value.repo } : {}) },
-    };
-  } catch {
-    /* optional metadata storage */
-  }
-}
-
-function IconButton({
-  label,
-  onClick,
-  children,
-  tone,
-  busy,
-}: {
-  label: string;
-  onClick?: () => void;
-  children: ReactNode;
-  tone?: 'danger';
-  busy?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      className={`agg-btn${tone ? ` agg-btn--${tone}` : ''}${busy ? ' agg-btn--busy' : ''}`}
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      aria-busy={busy || undefined}
-    >
-      {children}
-    </button>
-  );
-}
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-function intersect(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null) {
-  if (!a) return b;
-  if (!b) return a;
-  const out = new Set<string>();
-  for (const x of a) if (b.has(x)) out.add(x);
-  return out;
-}
 
 export function GitGraphViewer({
   title,
@@ -197,28 +140,10 @@ export function GitGraphViewer({
   const t = getMessages(loc);
   const prefersDark = usePrefersDark();
   const systemReducedMotion = usePrefersReducedMotion();
-  const [ownAnimationOff, setOwnAnimationOff] = useState(() => {
-    if (animationOffProp !== undefined) return false;
-    try {
-      return localStorage.getItem('agg:animation-off') === 'true';
-    } catch {
-      return false;
-    }
-  });
-  const animationOff = animationOffProp ?? ownAnimationOff;
-  const controlledAnimationOff = animationOffProp !== undefined;
-  const toggleAnimationOff = useCallback(() => {
-    const next = !animationOff;
-    if (!controlledAnimationOff) {
-      setOwnAnimationOff(next);
-      try {
-        localStorage.setItem('agg:animation-off', String(next));
-      } catch {
-        /* optional */
-      }
-    }
-    onAnimationOffChange?.(next);
-  }, [animationOff, controlledAnimationOff, onAnimationOffChange]);
+  const [animationOff, toggleAnimationOff] = useAnimationOff(
+    animationOffProp,
+    onAnimationOffChange,
+  );
   const reducedMotion = systemReducedMotion || animationOff;
   const scheme = resolveScheme(themeId, theme, prefersDark);
 
@@ -231,85 +156,8 @@ export function GitGraphViewer({
   const { width: rootWidth } = useElementSize(rootRef);
 
   const [webglFailed, setWebglFailed] = useState(false);
-  const diagnosticsScope = useMemo(() => ({}), [title, sourceKey, diagnostics, viewerStateKey]);
-  const [inspectionState, setInspectionState] = useState(() => {
-    const saved = savedInspection(viewerStateKey);
-    return {
-      scope: diagnosticsScope,
-      value: saved?.inspection,
-      initialOpen: saved?.open,
-      canRestore: !viewerStateKey && state.kind !== 'ready',
-    };
-  });
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(
-    inspectionState.initialOpen ??
-      Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest),
-  );
-  if (inspectionState.scope !== diagnosticsScope) {
-    // A freshly mounted overlay obtains its opaque generation asynchronously.
-    // Restore once before its first ready commit; active scope changes clear it.
-    const restored =
-      inspectionState.canRestore && state.kind === 'ready'
-        ? savedInspection(viewerStateKey)
-        : undefined;
-    setInspectionState({
-      scope: diagnosticsScope,
-      value: restored?.inspection,
-      initialOpen: undefined,
-      canRestore: inspectionState.canRestore && state.kind !== 'ready',
-    });
-    if (restored) setDiagnosticsOpen(restored.open);
-  }
-  const inspection = inspectionState.scope === diagnosticsScope ? inspectionState.value : undefined;
-  const setInspection = useCallback(
-    (value?: CommitInspection) => {
-      setInspectionState({
-        scope: diagnosticsScope,
-        value,
-        initialOpen: undefined,
-        canRestore: false,
-      });
-    },
-    [diagnosticsScope],
-  );
-  const [selection, setSelection] = useState<{ scope: object; sha: string | null }>(() => ({
-    scope: diagnosticsScope,
-    sha: null,
-  }));
-  const selectedSha = selection.scope === diagnosticsScope ? selection.sha : null;
-  const setSelectedSha = useCallback(
-    (value: SetStateAction<string | null>, preserveInspection = false) => {
-      if (!preserveInspection) setInspection(undefined);
-      setSelection((previous) => ({
-        scope: diagnosticsScope,
-        sha:
-          typeof value === 'function'
-            ? value(previous.scope === diagnosticsScope ? previous.sha : null)
-            : value,
-      }));
-    },
-    [diagnosticsScope, setInspection],
-  );
-  const onInspectionChange = useCallback(
-    (value?: CommitInspection) => {
-      if (value) setSelectedSha(null, true);
-      setInspection(value);
-    },
-    [setSelectedSha, setInspection],
-  );
-  const [selectionRevision, setSelectionRevision] = useState(0);
-  const [query, setQuery] = useState('');
-  const [cursor, setCursor] = useState(-1);
-  const [focusBranch, setFocusBranch] = useState<string | null>(null);
   const [scrollbarW, setScrollbarW] = useState(0);
-  const [ownDetailSize, setOwnDetailSize] = useState<DetailSize>('normal');
-  const detailSize = detailSizeProp ?? ownDetailSize;
-  const controlledDetailSize = detailSizeProp !== undefined;
-  const toggleDetailSize = useCallback(() => {
-    const next: DetailSize = detailSize === 'wide' ? 'normal' : 'wide';
-    if (!controlledDetailSize) setOwnDetailSize(next);
-    onDetailSizeChange?.(next);
-  }, [detailSize, controlledDetailSize, onDetailSizeChange]);
+  const [detailSize, toggleDetailSize] = useDetailSize(detailSizeProp, onDetailSizeChange);
 
   const appearance = themeAppearance(themeId);
   const sceneAppearance = useMemo<SceneAppearance>(
@@ -321,70 +169,30 @@ export function GitGraphViewer({
     }),
     [appearance, scheme],
   );
-  const sourceLayout = state.kind === 'ready' ? state.layout : null;
-  const layout = useMemo(
-    () => (sourceLayout ? recolorLayout(sourceLayout, appearance.palette) : null),
-    [sourceLayout, appearance],
+  // ── 由 layout 衍生的資料（主題配色、統計、可到達性、相對時間的基準） ─────────
+  const { layout, derived, hasRows, now } = useViewerLayout(
+    state.kind === 'ready' ? state.layout : null,
+    appearance,
   );
-  const hasRows = Boolean(layout && layout.nodes.length > 0);
-  useEffect(() => {
-    if (!viewerStateKey || !layout || inspectionState.scope !== diagnosticsScope) return;
-    try {
-      sessionStorage.setItem(
-        `agg:inspection:${viewerStateKey}`,
-        JSON.stringify({ version: 1, inspection, open: diagnosticsOpen }),
-      );
-    } catch {
-      /* store metadata only, never diagnostic contents or credentials */
-    }
-  }, [
-    viewerStateKey,
-    layout,
-    inspection,
-    diagnosticsOpen,
-    inspectionState.scope,
-    diagnosticsScope,
-  ]);
 
-  const contextKey = JSON.stringify([
-    sourceKey ?? '',
-    diagnostics?.context?.commit ?? null,
-    diagnostics?.context?.pullRequest ?? null,
-  ]);
+  // ── 診斷檢視與選取：依 scope（title / 來源 / adapter / viewerStateKey）隔離 ─────
+  const diagnosticsScope = useMemo(() => ({}), [title, sourceKey, diagnostics, viewerStateKey]);
   const hasContext = Boolean(diagnostics?.context?.commit || diagnostics?.context?.pullRequest);
-  const lastContextKey = useRef(contextKey);
-  const contextNavigated = useRef(false);
-  useLayoutEffect(() => {
-    if (!layout || lastContextKey.current === contextKey) return;
-    lastContextKey.current = contextKey;
-    if (hasContext) {
-      setDiagnosticsOpen(true);
-      contextNavigated.current = true;
-      const commit = diagnostics?.context?.commit;
-      setSelectedSha(
-        commit ? (layout.nodes.find((n) => n.sha.startsWith(commit))?.sha ?? null) : null,
-      );
-      setFocusBranch(null);
-      setQuery('');
-      setCursor(-1);
-    }
-  }, [contextKey, layout, diagnostics, hasContext, setSelectedSha]);
-
-  // ── 由 layout 衍生的資料（統計、可到達性、搜尋） ──────────────────────────
-  const derived = useMemo(() => {
-    if (!layout) return null;
-    const bySha = new Map(layout.nodes.map((n) => [n.sha, n]));
-    const reach = buildReachability(layout);
-    const defaultName = layout.branches.find((b) => b.isDefault)?.name;
-    const ahead = new Map<string, number>();
-    const commitsOn = new Map<string, number>();
-    for (const b of layout.branches) {
-      commitsOn.set(b.name, reach.get(b.name)?.size ?? 0);
-      if (layout.coverage?.commits.status === 'complete' && defaultName && b.name !== defaultName)
-        ahead.set(b.name, aheadCount(reach, b.name, defaultName));
-    }
-    return { bySha, reach, stats: computeStats(layout), defaultName, ahead, commitsOn };
-  }, [layout]);
+  const { inspection, setInspection, diagnosticsOpen, setDiagnosticsOpen } = useInspection({
+    scope: diagnosticsScope,
+    viewerStateKey,
+    ready: state.kind === 'ready',
+    layout,
+    defaultOpen: hasContext,
+  });
+  const {
+    selectedSha,
+    selectionInScope,
+    setSelectedSha,
+    onInspectionChange,
+    selectionRevision,
+    bumpSelectionRevision,
+  } = useSelection(diagnosticsScope, setInspection);
   const selectedNode = selectedSha && derived ? derived.bySha.get(selectedSha) : undefined;
 
   // 版面尺寸：依「列表實際可用寬度」計算（詳情並排時列表變窄）；數值沒變就沿用舊物件，
@@ -401,39 +209,85 @@ export function GitGraphViewer({
   );
   metricsPrev.current = metrics;
 
-  // 相對時間的「現在」：每次拿到新資料（重新整理、剛 commit）就更新；
-  // 只是在後面接上更早的歷史時沿用，既有的幾千列不用因為 now 變了而整批重繪
-  const nowRef = useRef<{ layout: GraphLayout | null; now: number } | null>(null);
-  if (!nowRef.current || nowRef.current.layout !== layout) {
-    const keep = nowRef.current && isAppendOnly(nowRef.current.layout, layout);
-    nowRef.current = { layout, now: keep ? nowRef.current!.now : Date.now() };
-  }
-  const now = nowRef.current.now;
+  const scrollToRow = useCallback(
+    (row: number, how: 'nearest' | 'center') => {
+      const sc = scrollerRef.current;
+      if (!sc) return;
+      const { rowH, topPad } = metrics;
+      const y = topPad + row * rowH;
+      const h = sc.clientHeight;
+      let top = sc.scrollTop;
+      if (h < rowH * 2.5)
+        top = y; // 矮到放不下幾列：直接讓那一列貼齊上緣
+      else if (how === 'center') top = y + rowH / 2 - h / 2;
+      else if (y < sc.scrollTop + rowH * 0.25) top = y - rowH * 0.75;
+      else if (y + rowH > sc.scrollTop + h - rowH * 0.25) top = y + rowH * 1.75 - h;
+      else return;
+      sc.scrollTo({
+        top: clamp(top, 0, Math.max(0, sc.scrollHeight - h)),
+        behavior: reducedMotion ? 'auto' : 'smooth',
+      });
+    },
+    [metrics, reducedMotion],
+  );
 
-  const branchSet = useMemo(
-    () => (focusBranch && derived ? (derived.reach.get(focusBranch) ?? null) : null),
-    [focusBranch, derived],
+  const select = useCallback(
+    (sha: string | null, how: 'nearest' | 'center' | null = null) => {
+      setSelectedSha(sha);
+      bumpSelectionRevision();
+      const row = sha ? derived?.bySha.get(sha)?.row : undefined;
+      if (row !== undefined && how) scrollToRow(row, how);
+    },
+    [derived, scrollToRow, setSelectedSha, bumpSelectionRevision],
   );
-  // 搜尋結果只算「沒被 branch 聚焦淡化掉」的列：計數、上一筆 / 下一筆、淡化三者一致
-  const matchShas = useMemo(
-    () =>
-      layout && query.trim()
-        ? layout.nodes
-            .filter((n) => matchesQuery(n, query) && (!branchSet || branchSet.has(n.sha)))
-            .map((n) => n.sha)
-        : null,
-    [layout, query, branchSet],
+
+  // ── 搜尋 / branch 聚焦 ─────────────────────────────────────────────────
+  const { focusBranch, setFocusBranch, branchSet, onFocusBranch } = useBranchFocus(
+    layout,
+    derived,
+    scrollToRow,
   );
-  const matchSet = useMemo(() => (matchShas ? new Set(matchShas) : null), [matchShas]);
-  const active = useMemo(() => intersect(matchSet, branchSet), [matchSet, branchSet]);
+  const { query, setQuery, onQuery, cursor, setCursor, matchShas, active, stepMatch } = useSearch(
+    layout?.nodes,
+    branchSet,
+    select,
+  );
   const sceneFocus = useMemo(() => ({ active, edges: branchSet !== null }), [active, branchSet]);
+
+  // 診斷 context（帶著 commit / PR 開啟）換了：打開面板、選 context 的 commit、清掉聚焦與搜尋
+  const contextKey = diagnosticsContextKey(sourceKey, diagnostics?.context);
+  const lastContextKey = useRef(contextKey);
+  const contextNavigated = useRef(false);
+  useLayoutEffect(() => {
+    if (!layout || lastContextKey.current === contextKey) return;
+    lastContextKey.current = contextKey;
+    if (hasContext) {
+      setDiagnosticsOpen(true);
+      contextNavigated.current = true;
+      const commit = diagnostics?.context?.commit;
+      setSelectedSha(commit ? commitByPrefix(layout.nodes, commit) : null);
+      setFocusBranch(null);
+      setQuery('');
+      setCursor(-1);
+    }
+  }, [
+    contextKey,
+    layout,
+    diagnostics,
+    hasContext,
+    setSelectedSha,
+    setDiagnosticsOpen,
+    setFocusBranch,
+    setQuery,
+    setCursor,
+  ]);
 
   // layout 換掉之後，已經不存在的選取 / 聚焦要放掉
   useEffect(() => {
     if (!derived) return;
     if (selectedSha && !derived.bySha.has(selectedSha)) setSelectedSha(null);
     if (focusBranch && !derived.reach.has(focusBranch)) setFocusBranch(null);
-  }, [derived, selectedSha, focusBranch, setSelectedSha]);
+  }, [derived, selectedSha, focusBranch, setSelectedSha, setFocusBranch]);
 
   // ── 捲動：保持使用者的位置、跳到某一列 ───────────────────────────────────
   const anchor = useRef<{ sha?: string; frac: number }>({ frac: 0 });
@@ -483,46 +337,25 @@ export function GitGraphViewer({
     const remounted = lastScroller.current !== sc;
     lastScroller.current = sc;
     if (lastRepo.current !== repo) {
-      // 換了 repo / 來源：從頭看
+      // 換了 repo / 來源：從頭看（重新整理則恢復 sessionStorage 裡同一個情境的位置與選取）
       lastRepo.current = repo;
-      let saved: {
-        selected?: string | null;
-        contextKey?: string;
-        viewerStateKey?: string;
-        branch?: string;
-        query?: string;
-        anchor?: string;
-        frac?: number;
-      } = {};
-      try {
-        saved = JSON.parse(sessionStorage.getItem(`agg:focus:${identity}`) ?? '{}');
-      } catch {
-        /* storage is optional */
-      }
-      const sameContext =
-        !contextNavigated.current &&
-        (viewerStateKey === undefined || saved.viewerStateKey === viewerStateKey) &&
-        (saved.contextKey === contextKey || (!hasContext && saved.contextKey === undefined));
+      let saved = readSavedFocus(identity);
+      const sameContext = isSameFocusContext({
+        saved,
+        contextNavigated: contextNavigated.current,
+        viewerStateKey,
+        contextKey,
+        hasContext,
+      });
       if (!sameContext || switchedIdentity.current) saved = {};
       switchedIdentity.current = false;
-      const restored = saved.anchor ? layout.nodes.find((n) => n.sha === saved.anchor) : undefined;
-      sc.scrollTop = restored ? Math.max(0, topPad + (restored.row + (saved.frac ?? 0)) * rowH) : 0;
+      const restored = restoreFocus(saved, sameContext, layout, diagnostics?.context?.commit);
+      sc.scrollTop =
+        restored.anchorRow !== null ? Math.max(0, topPad + restored.anchorRow * rowH) : 0;
       anchor.current = { frac: 0 };
-      const context = diagnostics?.context?.commit;
-      setSelectedSha(
-        sameContext && saved.selected === null
-          ? null
-          : saved.selected && layout.nodes.some((n) => n.sha === saved.selected)
-            ? saved.selected
-            : context
-              ? (layout.nodes.find((n) => n.sha.startsWith(context))?.sha ?? null)
-              : null,
-        true,
-      );
-      setFocusBranch(
-        saved.branch && layout.branches.some((b) => b.name === saved.branch) ? saved.branch : null,
-      );
-      setQuery(typeof saved.query === 'string' ? saved.query : '');
+      setSelectedSha(restored.selected, true);
+      setFocusBranch(restored.branch);
+      setQuery(restored.query);
       setCursor(-1);
     } else {
       const rowOf = new Map(layout.nodes.map((n) => [n.sha, n.row]));
@@ -543,6 +376,8 @@ export function GitGraphViewer({
     contextNavigated.current = false;
     metricsRef.current = metrics;
     rememberAnchor();
+    // identity 的變化已經反映在 sourceKey / layout 裡；diagnostics 只讀 context.commit（已在 contextKey 裡）
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps 與拆出 hook 之前相同
   }, [
     layout,
     metrics,
@@ -555,23 +390,16 @@ export function GitGraphViewer({
   ]);
 
   useEffect(() => {
-    if (!layout || selection.scope !== diagnosticsScope) return;
-    try {
-      sessionStorage.setItem(
-        `agg:focus:${identity}`,
-        JSON.stringify({
-          contextKey,
-          viewerStateKey,
-          selected: selectedSha,
-          branch: focusBranch,
-          query,
-          anchor: anchor.current.sha,
-          frac: anchor.current.frac,
-        }),
-      );
-    } catch {
-      /* optional preference storage */
-    }
+    if (!layout || !selectionInScope) return;
+    writeSavedFocus(identity, {
+      contextKey,
+      viewerStateKey,
+      selected: selectedSha,
+      branch: focusBranch,
+      query,
+      anchor: anchor.current.sha,
+      frac: anchor.current.frac,
+    });
   }, [
     identity,
     contextKey,
@@ -580,7 +408,7 @@ export function GitGraphViewer({
     selectedSha,
     focusBranch,
     query,
-    selection.scope,
+    selectionInScope,
     diagnosticsScope,
   ]);
 
@@ -591,38 +419,6 @@ export function GitGraphViewer({
     const w = sc.offsetWidth - sc.clientWidth;
     setScrollbarW((prev) => (prev === w ? prev : w));
   });
-
-  const scrollToRow = useCallback(
-    (row: number, how: 'nearest' | 'center') => {
-      const sc = scrollerRef.current;
-      if (!sc) return;
-      const { rowH, topPad } = metrics;
-      const y = topPad + row * rowH;
-      const h = sc.clientHeight;
-      let top = sc.scrollTop;
-      if (h < rowH * 2.5)
-        top = y; // 矮到放不下幾列：直接讓那一列貼齊上緣
-      else if (how === 'center') top = y + rowH / 2 - h / 2;
-      else if (y < sc.scrollTop + rowH * 0.25) top = y - rowH * 0.75;
-      else if (y + rowH > sc.scrollTop + h - rowH * 0.25) top = y + rowH * 1.75 - h;
-      else return;
-      sc.scrollTo({
-        top: clamp(top, 0, Math.max(0, sc.scrollHeight - h)),
-        behavior: reducedMotion ? 'auto' : 'smooth',
-      });
-    },
-    [metrics, reducedMotion],
-  );
-
-  const select = useCallback(
-    (sha: string | null, how: 'nearest' | 'center' | null = null) => {
-      setSelectedSha(sha);
-      setSelectionRevision((value) => value + 1);
-      const row = sha ? derived?.bySha.get(sha)?.row : undefined;
-      if (row !== undefined && how) scrollToRow(row, how);
-    },
-    [derived, scrollToRow, setSelectedSha],
-  );
 
   // 手機的底部面板在 flex 流程裡（列表的可視高度會縮小）：面板「剛打開」時，等版面更新完再把那一列捲到看得見的地方。
   // 面板已經開著時（上一個 / 下一個、搜尋跳轉）由 select() 自己決定對齊方式，這裡不要再蓋掉。
@@ -655,9 +451,9 @@ export function GitGraphViewer({
   const onRowSelect = useCallback(
     (sha: string) => {
       setSelectedSha((cur) => (cur === sha ? null : sha));
-      setSelectionRevision((value) => value + 1);
+      bumpSelectionRevision();
     },
-    [setSelectedSha],
+    [setSelectedSha, bumpSelectionRevision],
   );
 
   const moveSelection = useCallback(
@@ -676,35 +472,6 @@ export function GitGraphViewer({
       select(L.nodes[row]!.sha, 'nearest');
     },
     [selectedSha, derived, metrics, select],
-  );
-
-  // ── 搜尋 / branch 聚焦 ─────────────────────────────────────────────────
-  const onQuery = useCallback((q: string) => {
-    setQuery(q);
-    setCursor(-1);
-  }, []);
-
-  const stepMatch = useCallback(
-    (dir: 1 | -1) => {
-      if (!matchShas || matchShas.length === 0) return;
-      const next = (cursor + dir + matchShas.length) % matchShas.length;
-      // 第一次按「上一筆」從最後一筆開始
-      const idx = cursor === -1 && dir === -1 ? matchShas.length - 1 : next;
-      setCursor(idx);
-      select(matchShas[idx]!, 'center');
-    },
-    [matchShas, cursor, select],
-  );
-
-  const onFocusBranch = useCallback(
-    (name: string | null) => {
-      setFocusBranch(name);
-      if (!name || !layout) return;
-      const tip = layout.branches.find((b) => b.name === name)?.sha;
-      const row = tip ? derived?.bySha.get(tip)?.row : undefined;
-      if (row !== undefined) scrollToRow(row, 'center');
-    },
-    [layout, derived, scrollToRow],
   );
 
   const openCommit = useCallback(
