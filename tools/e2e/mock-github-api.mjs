@@ -141,6 +141,13 @@ export const latency = { ms: 0 };
  */
 export const faults = { more: 0 };
 /**
+ * 每個 API 回應都帶的 rate limit 標頭（與 api.github.com 一樣）。預設是「未登入、還剩很多」（59 / 60），
+ * 不會觸發額度偏低的提示；要驗證提示的步驟把 remaining 調低，結束後記得改回 RATE_LIMIT_DEFAULT。
+ * 重置時間固定在回應當下的 20 分鐘後。
+ */
+export const RATE_LIMIT_DEFAULT = Object.freeze({ limit: 60, remaining: 59 });
+export const rateLimit = { ...RATE_LIMIT_DEFAULT };
+/**
  * 暫停「從 commit sha 往回抓」的請求：`gate.hold = true` 之後到達的這類請求先排隊（`gate.queue.length` 看得到幾個），
  * 直到 `releaseHeld()`（會先把 hold 關掉，之後的請求照常回應）。用來在「這一批一定還沒回來」的狀態下量畫面，不靠時間差。
  * 排隊中的請求還沒記進 seen.paths / seen.pending（放行時才記）。
@@ -209,8 +216,18 @@ export function startMock() {
         res.writeHead(204, { ...cors, 'access-control-max-age': '600' });
         return res.end();
       }
+      const rateHeaders = {
+        'x-ratelimit-limit': String(rateLimit.limit),
+        'x-ratelimit-remaining': String(rateLimit.remaining),
+        'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 1200),
+      };
       const json = (status, body, headers = {}) => {
-        res.writeHead(status, { 'content-type': 'application/json', ...cors, ...headers });
+        res.writeHead(status, {
+          'content-type': 'application/json',
+          ...cors,
+          ...rateHeaders,
+          ...headers,
+        });
         res.end(JSON.stringify(body));
       };
       const p = url.pathname;

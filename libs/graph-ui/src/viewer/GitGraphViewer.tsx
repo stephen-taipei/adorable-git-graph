@@ -6,6 +6,7 @@ import {
   buildReachability,
   computeStats,
   isFullSha,
+  isRateLimitLow,
   matchesQuery,
   recolorLayout,
 } from '@adorable/graph-core';
@@ -928,6 +929,26 @@ export function GitGraphViewer({
             {webglFailed && (
               <div className="agg-banner" role="status">
                 {t.webglFail}
+              </div>
+            )}
+            {layout.rateLimit && isRateLimitLow(layout.rateLimit, now) && (
+              // 額度快用完的提示：不擋操作，只在列表上方多一行；未登入時給「加入 token」的捷徑（打開既有的設定）
+              <div className="agg-banner agg-banner--quota" role="status">
+                {t.quotaLow(layout.rateLimit.remaining, layout.rateLimit.limit)}
+                {' · '}
+                {t.rateLimitReset(formatDuration(Math.max(0, layout.rateLimit.resetAt - now), loc))}
+                {layout.rateLimit.limit <= 60 && (
+                  <>
+                    {' · '}
+                    {onOpenSettings ? (
+                      <button type="button" className="agg-banner-link" onClick={onOpenSettings}>
+                        {t.addToken}
+                      </button>
+                    ) : (
+                      t.addToken
+                    )}
+                  </>
+                )}
               </div>
             )}
             {state.kind === 'ready' && state.refreshError && (

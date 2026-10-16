@@ -27,11 +27,13 @@ import { fakeGithubPage } from '../../../tools/e2e/fake-github-page.mjs';
 import { colorDistance, inkRatio, samplePixels } from '../../../tools/e2e/pixels.mjs';
 import {
   LONG,
+  RATE_LIMIT_DEFAULT,
   SPECS,
   faults,
   gate,
   isMoreRequest as isMockMoreRequest,
   latency,
+  rateLimit,
   releaseHeld,
   seen,
   sha,
@@ -1813,27 +1815,45 @@ try {
     },
   );
 
-  await step('second open is served from cache; refresh button forces a re-fetch', async () => {
-    await openOverlay();
-    // 先強制重抓一次：快取時間重新計算，下面的快取斷言不受執行時間影響。要等到 API 請求完全停下來才往下
-    const first = seen.paths.length;
-    await page.getByRole('button', { name: L.refresh }).click();
-    await waitUntil(() => seen.paths.length > first, 15_000, 'forced refresh reaches the API');
-    await quiet(700);
-    await closeOverlay();
-    const before = seen.paths.length;
-    await page.locator('.agg-fab').click();
-    await page.locator('.agg-canvas canvas').waitFor();
-    await page.locator('.agg-commit').first().waitFor();
-    await page.waitForTimeout(500);
-    assert.equal(seen.paths.length, before, 'expected a cache hit (no new API requests)');
-    await page.getByRole('button', { name: L.refresh }).click();
-    await waitUntil(() => seen.paths.length > before, 15_000, 'refresh re-fetches');
-    await page.locator('.agg-canvas canvas').waitFor();
-    await page.locator('.agg-commit').first().waitFor();
-    await quiet(700);
-    await closeOverlay();
-  });
+  await step(
+    'second open is served from cache; refresh button forces a re-fetch; a low GitHub API quota shows a hint that the cached graph does not repeat',
+    async () => {
+      await openOverlay();
+      const hint = page.locator('.agg-banner--quota');
+      try {
+        // 先強制重抓一次：快取時間重新計算，下面的快取斷言不受執行時間影響。要等到 API 請求完全停下來才往下
+        // 這次 mock 回報額度只剩 5 / 60：列表上方出現一行提示（附「加入 token」→ 既有的設定頁）
+        rateLimit.remaining = 5;
+        const first = seen.paths.length;
+        await page.getByRole('button', { name: L.refresh }).click();
+        await waitUntil(() => seen.paths.length > first, 15_000, 'forced refresh reaches the API');
+        await quiet(700);
+        await hint.waitFor({ timeout: 15_000 });
+        assert.match(await hint.innerText(), /5 of 60 requests left|剩 5 \/ 60 次/);
+        assert.equal(await hint.getByRole('button', { name: /token/i }).count(), 1);
+        await shot(page, '8b-quota-hint.png');
+        await closeOverlay();
+        const before = seen.paths.length;
+        await page.locator('.agg-fab').click();
+        await page.locator('.agg-canvas canvas').waitFor();
+        await page.locator('.agg-commit').first().waitFor();
+        await page.waitForTimeout(500);
+        assert.equal(seen.paths.length, before, 'expected a cache hit (no new API requests)');
+        // cache 不保存抓取當下的額度：命中 cache 的圖不顯示過時的提示
+        assert.equal(await hint.count(), 0, 'a cached graph carries no quota hint');
+        Object.assign(rateLimit, RATE_LIMIT_DEFAULT);
+        await page.getByRole('button', { name: L.refresh }).click();
+        await waitUntil(() => seen.paths.length > before, 15_000, 'refresh re-fetches');
+        await page.locator('.agg-canvas canvas').waitFor();
+        await page.locator('.agg-commit').first().waitFor();
+        await quiet(700);
+        assert.equal(await hint.count(), 0, 'no quota hint while plenty is left');
+      } finally {
+        Object.assign(rateLimit, RATE_LIMIT_DEFAULT);
+      }
+      await closeOverlay();
+    },
+  );
 
   await step('night theme follows GitHub color mode and still paints the graph', async () => {
     await page.evaluate(() => (document.documentElement.dataset.colorMode = 'dark'));

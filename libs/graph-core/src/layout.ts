@@ -556,6 +556,7 @@ export function buildLayout(data: GraphData, options: BuildLayoutOptions = {}): 
           : data.coverage.commits,
     },
     fetchedAt: data.fetchedAt,
+    ...(data.rateLimit ? { rateLimit: data.rateLimit } : {}),
     nodes,
     edges,
     branches,

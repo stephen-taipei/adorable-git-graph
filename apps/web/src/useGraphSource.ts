@@ -7,6 +7,7 @@ import {
   missingParents,
   createGitHubDiagnostics,
   cacheDiagnostics,
+  withoutRateLimit,
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter } from '@adorable/graph-core';
 import { createLocalAdapter } from './diagnostics';
@@ -211,7 +212,12 @@ export function clearGitHubCache(): void {
 function writeGhCache(key: string, graph: GraphData, scope: string | null) {
   if (!scope) return;
   try {
-    const entry: GhCacheEntry = { savedAt: Date.now(), graph, credentialScope: scope };
+    // rate limit 是抓取當下的額度：不進 cache，cache 命中的圖就不會顯示過時的剩餘次數
+    const entry: GhCacheEntry = {
+      savedAt: Date.now(),
+      graph: withoutRateLimit(graph),
+      credentialScope: scope,
+    };
     sessionStorage.setItem(GH_CACHE_PREFIX + key, JSON.stringify(entry));
   } catch {
     /* 容量不足等：略過 */

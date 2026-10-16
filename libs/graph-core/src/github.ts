@@ -1,5 +1,5 @@
 import { appendCommits, missingParents } from './history.ts';
-import type { CommitInput, GraphData, RefInput } from './types.ts';
+import type { CommitInput, GraphData, RateLimitInfo, RefInput } from './types.ts';
 import { coverage } from './diagnostics.ts';
 
 export type GitHubErrorCode =
@@ -140,12 +140,37 @@ function clampPerPage(n: number | undefined): number {
   return Number.isFinite(v) ? Math.min(Math.max(v, 1), 100) : 60;
 }
 
+/** 從回應標頭讀 rate limit；三個標頭缺任何一個（或不是數字）就當作沒有。 */
+function readRateLimit(headers: Headers | undefined): RateLimitInfo | undefined {
+  const num = (name: string) => {
+    const raw = headers?.get(name);
+    const n = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const remaining = num('x-ratelimit-remaining');
+  const limit = num('x-ratelimit-limit');
+  const reset = num('x-ratelimit-reset');
+  if (remaining === undefined || limit === undefined || reset === undefined) return undefined;
+  return { remaining, limit, resetAt: reset * 1000 };
+}
+
+/**
+ * 平行請求的回應順序不固定：重置時間較晚的是較新的時段；同一個時段裡剩餘次數最少的就是最新的值。
+ */
+function newerRateLimit(prev: RateLimitInfo | undefined, next: RateLimitInfo): RateLimitInfo {
+  if (!prev || next.resetAt > prev.resetAt) return next;
+  if (next.resetAt < prev.resetAt) return prev;
+  return next.remaining < prev.remaining ? next : prev;
+}
+
 /** GET 一個 API 路徑並解析 JSON；HTTP / 網路失敗一律轉成 GitHubError（呼叫端主動 abort 除外）。 */
 function githubGetter(opts: RequestOptions) {
   const base = (opts.apiBase ?? 'https://api.github.com').replace(/\/$/, '');
   const doFetch = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  /** 成功回應帶來的最新 rate limit（見 newerRateLimit）；回應沒有這些標頭就維持 undefined。 */
+  let rateLimit: RateLimitInfo | undefined;
 
-  return async function get<T>(
+  const get = async function get<T>(
     path: string,
     query: Record<string, string | number> = {},
   ): Promise<T> {
@@ -170,6 +195,8 @@ function githubGetter(opts: RequestOptions) {
       throw asNetworkError(err);
     }
     if (res.ok) {
+      const seen = readRateLimit(res.headers);
+      if (seen) rateLimit = newerRateLimit(rateLimit, seen);
       try {
         return (await res.json()) as T;
       } catch (err) {
@@ -193,6 +220,25 @@ function githubGetter(opts: RequestOptions) {
     }
     throw new GitHubError('unknown', `GitHub API error ${status}`, undefined, status);
   };
+  return Object.assign(get, { rateLimit: () => rateLimit });
+}
+
+/**
+ * 剩餘額度是否偏低，值得提醒使用者加 token。
+ * 未登入（limit ≤ 60）時一次沒有 cache 的載入就要 5–9 個請求，剩不到一半（約 3、4 次載入）就提醒；
+ * 有 token 的額度大得多，剩不到 20% 才提醒。重置時間已過（額度已恢復）不提醒。
+ */
+export function isRateLimitLow(rateLimit: RateLimitInfo | undefined, now = Date.now()): boolean {
+  if (!rateLimit || rateLimit.limit <= 0 || rateLimit.resetAt <= now) return false;
+  const ratio = rateLimit.limit <= 60 ? 0.5 : 0.2;
+  return rateLimit.remaining < rateLimit.limit * ratio;
+}
+
+/** 存進 cache 前拿掉 rateLimit：那是抓取當下的額度，cache 命中時早就過時了。 */
+export function withoutRateLimit(data: GraphData): GraphData {
+  if (data.rateLimit === undefined) return data;
+  const { rateLimit: _stale, ...rest } = data;
+  return rest;
 }
 
 export async function fetchGitHubGraph(
@@ -265,16 +311,30 @@ export async function fetchGitHubGraph(
     if (picked.length >= maxBranches) break;
   }
 
-  const results = await Promise.all(
-    picked.map((name) =>
-      get<ApiCommit[]>(`${repoPath}/commits`, { sha: headBySha.get(name)!, per_page: perBranch }),
-    ),
-  );
-
+  // commit 分兩階段抓，省 API 次數（未登入每小時只有 60 次）：
+  // 1. default branch 與正在瀏覽的 branch 平行抓；
+  // 2. 其餘選到的 branch 只抓 head 還不在已載入歷史裡的（例如已合併、或從 default 分出後沒有新 commit 的 branch，
+  //    它的 head 已經在 default 的那一頁裡，不必再花一個請求）。ref 照樣全部輸出。
+  // 第二階段裡互相包含的 branch 仍然各抓一次：要知道誰包含誰得先等結果，改成逐一抓太慢。
   const commits = new Map<string, CommitInput>();
-  for (const list of results) {
-    for (const c of list) if (!commits.has(c.sha)) commits.set(c.sha, mapApiCommit(c));
-  }
+  const fetchCommits = async (names: readonly string[]): Promise<void> => {
+    const results = await Promise.all(
+      names.map((name) =>
+        get<ApiCommit[]>(`${repoPath}/commits`, { sha: headBySha.get(name)!, per_page: perBranch }),
+      ),
+    );
+    // 依 picked 的順序合併（與一次全抓時相同的去重順序）
+    for (const list of results) {
+      for (const c of list) if (!commits.has(c.sha)) commits.set(c.sha, mapApiCommit(c));
+    }
+  };
+  // default branch 找不到（例如分支清單頁滿又查不到）時，第一階段改抓第一條選到的 branch
+  const preferred = picked.filter((name) => name === defaultBranch || name === hint);
+  const first = preferred.length ? preferred : picked.slice(0, 1);
+  await fetchCommits(first);
+  await fetchCommits(
+    picked.filter((name) => !first.includes(name) && !commits.has(headBySha.get(name)!)),
+  );
 
   const refs: RefInput[] = picked.map((name) => ({
     name,
@@ -324,6 +384,7 @@ export async function fetchGitHubGraph(
     refs,
     truncated,
     fetchedAt: observedAt,
+    ...(get.rateLimit() ? { rateLimit: get.rateLimit() } : {}),
   };
 }
 
