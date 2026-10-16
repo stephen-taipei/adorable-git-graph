@@ -84,6 +84,8 @@ export interface Messages {
   errors: Record<string, string>;
   rateLimitReset: (time: string) => string;
   addToken: string;
+  /** GitHub API 剩餘額度偏低的提示（見 graph-core 的 isRateLimitLow） */
+  quotaLow: (remaining: number, limit: number) => string;
 }
 
 const zhTW: Messages = {
@@ -182,6 +184,7 @@ const zhTW: Messages = {
   },
   rateLimitReset: (time) => `約 ${time} 後恢復`,
   addToken: '加入 token 可提升到每小時 5,000 次',
+  quotaLow: (remaining, limit) => `GitHub API 額度剩 ${remaining} / ${limit} 次`,
 };
 
 const en: Messages = {
@@ -280,6 +283,7 @@ const en: Messages = {
   },
   rateLimitReset: (time) => `resets in about ${time}`,
   addToken: 'Add a token to raise the limit to 5,000/h',
+  quotaLow: (remaining, limit) => `GitHub API: ${remaining} of ${limit} requests left`,
 };
 
 export function detectLocale(lang?: string): Locale {

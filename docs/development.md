@@ -13,7 +13,7 @@ cd ~/code/some-repo
 npx adorable-git-graph            # 開啟瀏覽器；也可以 npx adorable-git-graph ~/code/other --port 4300 --no-open
 ```
 
-與 `pnpm start` 是同一個畫面、同一套本機 repo endpoint（`apps/web/plugins/git-snapshot.ts` 的 `serveLocalRepos`），差別：
+與 `pnpm start` 是同一個畫面、同一套本機 repo endpoint（`libs/git-local`（`@adorable/git-local`）的 `serveLocalRepos`），差別：
 
 - 不需要 Vite：`apps/cli/src/server.ts` 是獨立的 `node:http` server，提供預先建置好的畫面（`VITE_AGG_SERVER=1` 建置，**bundle 不含任何 git 歷史**），
   即時更新用 SSE（`/__agg/events`）取代 HMR。
@@ -184,12 +184,14 @@ infinite scroll（本機 705 筆 / GitHub mock：捲到底分批載入、不跳�
 ```
 apps/
   web/                  Vite + React：pnpm start 的 localhost 版
-    plugins/            git-snapshot：執行 git log、監看 .git refs，經 HMR 推送新快照（virtual:git-snapshot）；掃描本機 repo、依 id 提供快照
+    plugins/            git-snapshot：Vite 接線，把 libs/git-local 掛到 dev server，提供 virtual:git-snapshot、經 HMR 推送新快照
     src/                SourceBar（本機 / GitHub 切換、本機 repo 選單）、TokenDialog、useGraphSource、localRepos
   extension/            Chrome（MV3）：只有建置入口、圖示產生器與 e2e，原始碼都在 libs/extension-core
   extension-firefox/    Firefox（MV3）：建置入口、web-ext 的 lint / package / run、e2e（puppeteer + 真實 Firefox）
   cli/                  npm 套件 adorable-git-graph：獨立 node:http server（SSE）+ 預先建置的 web 畫面、e2e（npm pack 後執行）
 libs/
+  git-local/            本機 git 執行環境（node 端，web dev server 與 cli 共用）：執行唯讀 git log / 診斷、監看 .git refs、
+                        掃描本機 repo、依 id 提供快照的 endpoint 與 Host / 同源檢查；`./protocol` 是瀏覽器也能用的協定
   extension-core/       兩個瀏覽器共用的 extension：background、content script（Shadow DOM 掛載 FAB + overlay）、options 頁、
                         建置（content/background 打成 IIFE）與 manifest 產生器、圖示
   graph-core/           純 TS、零相依：型別、lane 配置演算法、GitHub REST client、git log 解析、demo 資料
@@ -197,8 +199,8 @@ libs/
 tools/e2e/              e2e 共用：Chrome 偵測、mock GitHub API（含 CORS）、假的 GitHub 頁面、截圖像素判斷
 ```
 
-- `graph-core` / `graph-ui` 以 `exports → src/index.ts` 提供原始碼，由使用端 bundler 編譯，不需獨立 build；`extension-core` 例外：它是建置工具 + 原始碼套件（`exports` 為 `./build`、`./manifest`、`./icons`），由兩個 extension app 呼叫。
-- `graph-core` 是 **Node 可直接執行的 TS**（相對 import 帶 `.ts`、`erasableSyntaxOnly`），所以 `vite.config.ts` 與腳本能直接 import 它。
+- `graph-core` / `graph-ui` / `git-local` 以 `exports → src/index.ts` 提供原始碼，由使用端 bundler 編譯，不需獨立 build；`extension-core` 例外：它是建置工具 + 原始碼套件（`exports` 為 `./build`、`./manifest`、`./icons`），由兩個 extension app 呼叫。
+- `graph-core` 與 `git-local` 是 **Node 可直接執行的 TS**（相對 import 帶 `.ts`、`erasableSyntaxOnly`），所以 `vite.config.ts` 與腳本能直接 import 它們。
 - UI/UX 全部在 `graph-ui`（`GitGraphViewer`），web app 與 extension 只負責資料來源與外框。
 - 兩個瀏覽器版本的原始碼是同一份（`libs/extension-core`）；差異只在 manifest（`createManifest({ target })`）與 vite 轉譯目標，manifest 有單元測試鎖住。
 - Nx 的 `build` 快取已把 `AGG_*` 環境變數算進 hash（它們會改變產物），所以 dev / e2e 的建置不會被當成正式版從快取還原；`pnpm --filter … build` 本來就繞過 Nx。
@@ -206,7 +208,10 @@ tools/e2e/              e2e 共用：Chrome 偵測、mock GitHub API（含 CORS�
 ## 運作原理
 
 1. **資料**：background 以 GitHub REST API 抓 repo → default branch + 目前瀏覽的 branch + open PR 分支（其餘依序補到上限，預設 5 條），
-   各抓最近 60 筆 commit，以 sha 合併成 DAG，另抓 tags。約 `分支數 + 4` 次請求，結果快取 10 分鐘（`chrome.storage.local`）。
+   各抓最近 60 筆 commit，以 sha 合併成 DAG，另抓 tags。commit 分兩階段抓：先抓 default 與瀏覽中的 branch，
+   其餘 branch 的 head 已經在載入的歷史裡就不再請求（ref 照樣顯示），所以最多 `分支數 + 4` 次請求，
+   常見的「branch 都已合併」情況只要 5–6 次。結果快取 10 分鐘（`chrome.storage.local`）。
+   成功回應的 `x-ratelimit-*` 標頭記在 `GraphData.rateLimit`（不進快取）；剩餘額度偏低時列表上方會提示加入 token。
 2. **佈局**（`graph-core/layout.ts`）：children-first 拓樸排序 → 類 `git log --graph` 的 lane 配置；
    列 = 排序後的位置（0 = 最新）、欄 = lane（default branch 固定在第 0 欄）；每條 lane 有固定顏色；
    邊先沿自己的 lane 垂直走，只在靠近 parent 的一列以 S 曲線轉進它的 lane，避免穿過其他節點。

@@ -1,4 +1,4 @@
-import { MAX_DEPTH } from './protocol';
+import { MAX_DEPTH } from '@adorable/git-local/protocol';
 import { LOCAL_ONLY } from './localRepos';
 import { t } from './i18n';
 

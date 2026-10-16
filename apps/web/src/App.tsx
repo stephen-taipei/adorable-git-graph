@@ -16,7 +16,7 @@ import type { Source } from './source';
 import { useStored } from './storage';
 import { locale, t } from './i18n';
 import { clearGitHubCache, useGraphSource } from './useGraphSource';
-import { DEFAULT_REPO } from './protocol';
+import { DEFAULT_REPO } from '@adorable/git-local/protocol';
 import { useThemeStylesheet } from './useThemeStylesheet';
 import {
   AuthConflict,

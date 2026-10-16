@@ -4,9 +4,12 @@ import {
   fetchGitHubCommitsFrom,
   fetchGitHubGraph,
   fetchMoreGitHubHistory,
+  isRateLimitLow,
   resolveBranchHint,
+  withoutRateLimit,
 } from './github.ts';
 import { missingParents } from './history.ts';
+import { buildLayout } from './layout.ts';
 import type { GraphData } from './types.ts';
 
 const sha = (n: number) => n.toString(16).padStart(40, '0');
@@ -90,6 +93,142 @@ describe('fetchGitHubGraph', () => {
     // repo + branches + pulls + tags + 2 × commits
     expect(calls).toHaveLength(6);
     expect(g.commits[0]).toMatchObject({ authorLogin: 'a', message: 'commit 4' });
+  });
+
+  describe('API budget (two-phase commit fetching)', () => {
+    const json = (b: unknown) => () => new Response(JSON.stringify(b), { status: 200 });
+    const commitCalls = (calls: string[]) =>
+      calls.filter((c) => c.startsWith('/repos/o/r/commits'));
+
+    it('skips branches whose head is already in the default history, emitting the same refs', async () => {
+      const { impl, calls } = fakeApi();
+      const g = await fetchGitHubGraph('o', 'r', { fetchImpl: impl });
+      // a-old（sha 1）與 feat/x（sha 3）的 head 都在 main 的那一頁裡：只抓 main 一次
+      expect(commitCalls(calls)).toEqual([`/repos/o/r/commits?sha=${sha(4)}&per_page=60`]);
+      // repo + branches + pulls + tags + 1 × commits（以前是 3 × commits，共 7 個請求）
+      expect(calls).toHaveLength(5);
+      expect(g.refs).toEqual([
+        { name: 'main', sha: sha(4), kind: 'branch', isDefault: true },
+        { name: 'a-old', sha: sha(1), kind: 'branch', isDefault: false },
+        { name: 'feat/x', sha: sha(3), kind: 'branch', isDefault: false },
+        { name: 'v1', sha: sha(2), kind: 'tag' },
+      ]);
+      expect(g.commits.map((c) => c.sha)).toEqual([4, 3, 2, 1].map(sha));
+      expect(g.truncated).toBe(false);
+      expect(g.coverage?.refs).toMatchObject({ status: 'complete', reasons: [] });
+      expect(g.coverage?.commits).toMatchObject({ status: 'complete', reasons: [] });
+    });
+
+    it('still fetches a branch whose head is outside the loaded history', async () => {
+      const { impl, calls } = fakeApi({
+        '/repos/o/r/branches': json([
+          { name: 'main', commit: { sha: sha(4) } },
+          { name: 'side', commit: { sha: sha(9) } },
+          { name: 'feat/x', commit: { sha: sha(3) } },
+        ]),
+        '/repos/o/r/commits': () => {
+          throw new Error('unreachable');
+        },
+      });
+      const routed: typeof fetch = async (input, init) => {
+        const url = new URL(String(input));
+        if (url.pathname === '/repos/o/r/commits') {
+          calls.push(url.pathname + url.search);
+          const start = url.searchParams.get('sha');
+          const list =
+            start === sha(9)
+              ? [apiCommit(9, 4), apiCommit(4, 3), apiCommit(3, 2), apiCommit(2, 1), apiCommit(1)]
+              : [apiCommit(4, 3), apiCommit(3, 2), apiCommit(2, 1), apiCommit(1)];
+          return new Response(JSON.stringify(list), { status: 200 });
+        }
+        return impl(input, init);
+      };
+      const g = await fetchGitHubGraph('o', 'r', { fetchImpl: routed });
+      expect(commitCalls(calls)).toEqual([
+        `/repos/o/r/commits?sha=${sha(4)}&per_page=60`,
+        `/repos/o/r/commits?sha=${sha(9)}&per_page=60`,
+      ]);
+      expect(g.refs.filter((r) => r.kind === 'branch').map((r) => [r.name, r.isDefault])).toEqual([
+        ['main', true],
+        ['side', false],
+        ['feat/x', false],
+      ]);
+      expect(g.commits.map((c) => c.sha)).toEqual([4, 3, 2, 1, 9].map(sha));
+    });
+
+    it('fetches the browsed branch in the first phase even when it is contained in main', async () => {
+      const { impl, calls } = fakeApi();
+      await fetchGitHubGraph('o', 'r', { fetchImpl: impl, branchHint: 'a-old' });
+      expect(commitCalls(calls)).toEqual([
+        `/repos/o/r/commits?sha=${sha(4)}&per_page=60`,
+        `/repos/o/r/commits?sha=${sha(1)}&per_page=60`,
+      ]);
+    });
+  });
+
+  describe('rate limit', () => {
+    /** 每個成功回應都帶 rate limit 標頭，剩餘次數依請求順序遞減 */
+    const withRateHeaders = (impl: typeof fetch, limit = 60) => {
+      let used = 0;
+      const wrapped: typeof fetch = async (input, init) => {
+        const res = await impl(input, init);
+        used++;
+        return new Response(await res.text(), {
+          status: res.status,
+          headers: {
+            'x-ratelimit-limit': String(limit),
+            'x-ratelimit-remaining': String(limit - used),
+            'x-ratelimit-reset': '1800000000',
+          },
+        });
+      };
+      return { wrapped, used: () => used };
+    };
+
+    it('reports the remaining quota from the latest successful response', async () => {
+      const { impl } = fakeApi();
+      const { wrapped, used } = withRateHeaders(impl);
+      const g = await fetchGitHubGraph('o', 'r', { fetchImpl: wrapped });
+      expect(g.rateLimit).toEqual({
+        remaining: 60 - used(),
+        limit: 60,
+        resetAt: 1_800_000_000_000,
+      });
+      // 排版之後也帶著（viewer 從 layout 讀）
+      expect(buildLayout(g).rateLimit).toEqual(g.rateLimit);
+    });
+
+    it('omits rateLimit when the responses carry no rate limit headers', async () => {
+      const g = await fetchGitHubGraph('o', 'r', { fetchImpl: fakeApi().impl });
+      expect('rateLimit' in g).toBe(false);
+      expect('rateLimit' in buildLayout(g)).toBe(false);
+    });
+
+    it('isRateLimitLow: half of the anonymous quota, 20% of a token quota, never after the reset', () => {
+      const now = 1_000;
+      const at = (remaining: number, limit: number, resetAt = 2_000) => ({
+        remaining,
+        limit,
+        resetAt,
+      });
+      expect(isRateLimitLow(undefined, now)).toBe(false);
+      expect(isRateLimitLow(at(31, 60), now)).toBe(false);
+      expect(isRateLimitLow(at(29, 60), now)).toBe(true);
+      expect(isRateLimitLow(at(0, 60), now)).toBe(true);
+      expect(isRateLimitLow(at(1001, 5000), now)).toBe(false);
+      expect(isRateLimitLow(at(999, 5000), now)).toBe(true);
+      expect(isRateLimitLow(at(0, 60, 500), now)).toBe(false);
+      expect(isRateLimitLow(at(0, 0), now)).toBe(false);
+    });
+
+    it('withoutRateLimit drops the stale quota (for caches) and leaves the rest alone', async () => {
+      const { wrapped } = withRateHeaders(fakeApi().impl);
+      const g = await fetchGitHubGraph('o', 'r', { fetchImpl: wrapped });
+      const cached = withoutRateLimit(g);
+      expect('rateLimit' in cached).toBe(false);
+      expect(cached).toEqual({ ...g, rateLimit: undefined });
+      expect(withoutRateLimit(cached)).toBe(cached);
+    });
   });
 
   describe('when the first /branches page is full', () => {

@@ -6,6 +6,7 @@ import {
   fetchGitHubGraph,
   isDiagnosticRequest,
   isValidRepoSegment,
+  withoutRateLimit,
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphData } from '@adorable/graph-core';
 import { parseFetchMore } from '../shared/history';
@@ -274,7 +275,12 @@ async function fetchGraphScoped(
       try {
         // Await the actual write so a late stale write cannot land after its cleanup.
         await chrome.storage.local.set({
-          [key]: { savedAt: Date.now(), graph, credentialScope: scope } satisfies CacheEntry,
+          // rate limit 是抓取當下的額度：不進 cache，cache 命中的圖就不會顯示過時的剩餘次數
+          [key]: {
+            savedAt: Date.now(),
+            graph: withoutRateLimit(graph),
+            credentialScope: scope,
+          } satisfies CacheEntry,
         });
         await pruneCache();
         await validateSettingsScope(scoped, signal);
