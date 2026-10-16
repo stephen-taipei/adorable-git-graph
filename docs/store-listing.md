@@ -8,8 +8,8 @@
 - [ ] Firefox e2e 在 macOS 跑過：`pnpm --filter @adorable/extension-firefox e2e`（雲端容器沒有 Firefox）
 - [ ] Chrome：`pnpm --filter @adorable/extension release` → `apps/extension/release/adorable-git-graph-chrome-<version>.zip`
 - [ ] Firefox：`pnpm --filter @adorable/extension-firefox release` → `web-ext-artifacts/` 的 add-on zip 與 `adorable-git-graph-source.zip`
-- [ ] 截圖與宣傳圖：第一次先裝 Chromium（`pnpm --filter @adorable/extension exec playwright-core install chromium`；Google Chrome 正式版不能載入未封裝的 extension），再執行 `pnpm --filter @adorable/extension store-assets`（自己的電腦，需要連得到 github.com；預設拍 `stephen-taipei/adorable-git-grpah`，可加 `-- --repo owner/name`；詳情截圖預設自動挑沒有內文、沒被 revert 的 commit，也可以用 `-- --detail <sha>` 指定）
-- [ ] 隱私權政策網址可以打開：<https://github.com/stephen-taipei/adorable-git-grpah/blob/main/PRIVACY.md>
+- [ ] 截圖與宣傳圖：第一次先裝 Chromium（`pnpm --filter @adorable/extension exec playwright-core install chromium`；Google Chrome 正式版不能載入未封裝的 extension），再執行 `pnpm --filter @adorable/extension store-assets`（自己的電腦，需要連得到 github.com；預設拍 `stephen-taipei/adorable-git-graph`，可加 `-- --repo owner/name`；詳情截圖預設自動挑沒有內文、沒被 revert 的 commit，也可以用 `-- --detail <sha>` 指定）
+- [ ] 隱私權政策網址可以打開：<https://github.com/stephen-taipei/adorable-git-graph/blob/main/PRIVACY.md>
 - [ ] Chrome 開發者帳號（一次性註冊費）、AMO 帳號
 
 ## 1. 共用文案
@@ -38,7 +38,7 @@ Read-only and private by design:
 • Optional fine-grained, read-only GitHub token for higher rate limits and private repositories. It is stored only in your browser and sent only to api.github.com.
 
 Open any repository on github.com and click the Git Graph button (or the toolbar icon).
-Source code (Apache-2.0): https://github.com/stephen-taipei/adorable-git-grpah
+Source code (Apache-2.0): https://github.com/stephen-taipei/adorable-git-graph
 Also available for your local repositories: npx adorable-git-graph
 ```
 
@@ -60,7 +60,7 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
 • 可選填 fine-grained、唯讀的 GitHub token 以提高請求額度並讀取私有 repo；token 只存在你的瀏覽器，只會送往 api.github.com。
 
 打開 github.com 上的任一 repo，點右下角的 Git Graph 按鈕（或工具列圖示）即可。
-原始碼（Apache-2.0）：https://github.com/stephen-taipei/adorable-git-grpah
+原始碼（Apache-2.0）：https://github.com/stephen-taipei/adorable-git-graph
 本機 repo 版：npx adorable-git-graph
 ```
 
@@ -79,7 +79,7 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
 
 - 類別：Developer Tools（開發人員工具）
 - 語言：English（另可加繁體中文的本地化說明）
-- 首頁網址 / 支援網址：`https://github.com/stephen-taipei/adorable-git-grpah`、`https://github.com/stephen-taipei/adorable-git-grpah/issues`
+- 首頁網址 / 支援網址：`https://github.com/stephen-taipei/adorable-git-graph`、`https://github.com/stephen-taipei/adorable-git-graph/issues`
 
 **隱私權做法（Privacy practices）**
 
@@ -101,7 +101,7 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
   - **Web history** — 目前瀏覽的 GitHub repo（owner / 名稱，取自網址）會送到 api.github.com 以取得歷史。
   - 其他類別不勾。
 - 三項聲明全部勾選：不販售或轉移給第三方（核准用途除外）、不用於與單一用途無關的目的、不用於判斷信用或放款。
-- 隱私權政策網址：`https://github.com/stephen-taipei/adorable-git-grpah/blob/main/PRIVACY.md`
+- 隱私權政策網址：`https://github.com/stephen-taipei/adorable-git-graph/blob/main/PRIVACY.md`
 
 **發布設定**：可見度 Public；地區 All regions。第一次審查時間不固定，通常數天。
 
@@ -112,7 +112,7 @@ Adorable Git Graph 把任何 GitHub repo 的歷史畫成可愛、會動的 git g
 - 類別：Web Development（若後台已改名，選最接近「開發者工具」的類別）
 - 授權：Apache License 2.0
 - 隱私權政策：貼上 PRIVACY.md 的內容或網址
-- 支援網址：`https://github.com/stephen-taipei/adorable-git-grpah/issues`
+- 支援網址：`https://github.com/stephen-taipei/adorable-git-graph/issues`
 - 附加元件 ID：`adorable-git-graph@stephen.taipei`（manifest 內建，上架後不能改）
 
 **給審查員的說明（Notes to Reviewer）**
@@ -133,6 +133,6 @@ the options page is sent only to api.github.com as an Authorization header → o
 consent is requested when the user saves a token, and without it the token is neither stored nor sent.
 No data is sent to the developer or any other party.
 
-To test: open https://github.com/stephen-taipei/adorable-git-grpah and click the "Git Graph" button
+To test: open https://github.com/stephen-taipei/adorable-git-graph and click the "Git Graph" button
 at the bottom right (or the toolbar icon). No account or token is needed.
 ```

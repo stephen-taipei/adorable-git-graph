@@ -11,7 +11,7 @@
 [![Chrome](https://img.shields.io/badge/Chrome-MV3_%E2%89%A5116-4285F4?style=flat-square)](#chrome-擴充功能)
 [![Firefox](https://img.shields.io/badge/Firefox-MV3_%E2%89%A5140-FF7139?style=flat-square)](#firefox-附加元件)
 [![License](https://img.shields.io/badge/license-Apache--2.0-64748B?style=flat-square)](LICENSE)
-[![CI](https://github.com/stephen-taipei/adorable-git-grpah/actions/workflows/ci.yml/badge.svg)](https://github.com/stephen-taipei/adorable-git-grpah/actions/workflows/ci.yml)
+[![CI](https://github.com/stephen-taipei/adorable-git-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/stephen-taipei/adorable-git-graph/actions/workflows/ci.yml)
 
 [English](README.md) · **繁體中文**
 

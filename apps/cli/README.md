@@ -38,7 +38,7 @@ adorable-git-graph [repo] [options]
 The page can also show any GitHub repository (🐙 GitHub); that talks to `api.github.com` directly from your browser.
 
 There is also a Chrome extension and a Firefox add-on that show the same graph on github.com.
-Source, docs and privacy policy: <https://github.com/stephen-taipei/adorable-git-grpah>.
+Source, docs and privacy policy: <https://github.com/stephen-taipei/adorable-git-graph>.
 
 ## License
 

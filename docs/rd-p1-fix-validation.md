@@ -185,7 +185,7 @@ Ink ratio（desktop／mobile）：local 0.0308／0.1184、Chrome 0.0308／0.1184
 
 ## 第二輪之後：`387a57e`
 
-受測 SHA：`387a57ebb4f24a388811b5649977860e7e5ec2bd`（parent `4add24c`）。來源：[PR #7](https://github.com/stephen-taipei/adorable-git-grpah/pull/7) 的 Codex review（P2）。
+受測 SHA：`387a57ebb4f24a388811b5649977860e7e5ec2bd`（parent `4add24c`）。來源：[PR #7](https://github.com/stephen-taipei/adorable-git-graph/pull/7) 的 Codex review（P2）。
 
 - 問題：比較表單輸入大寫的完整 SHA 時，`isFullSha` 接受，但 GitHub 回傳小寫 canonical SHA，`libs/graph-core/src/github-diagnostics.ts` 以大小寫敏感比較而誤判「Pinned SHA mismatch」。此問題不屬於兩項 P1，但在同一個 PR 範圍內。
 - 修正：以小寫化的輸入比較；回傳不同 SHA 時仍拒絕。新增單元測試，修正前失敗（`Pinned SHA mismatch`）、修正後通過。

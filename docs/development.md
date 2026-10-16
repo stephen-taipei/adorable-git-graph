@@ -76,7 +76,7 @@ cd apps/cli && npm publish               # 發布（prepack 會重新建置）�
 ## Chrome extension（`apps/extension`）
 
 載入到 Chrome：`chrome://extensions` → 開啟「開發人員模式」→「載入未封裝項目」→ 選 `apps/extension/dist`。
-然後打開任一 GitHub repo（例如 `https://github.com/stephen-taipei/adorable-git-grpah`）：
+然後打開任一 GitHub repo（例如 `https://github.com/stephen-taipei/adorable-git-graph`）：
 
 - 右下角出現 **Git Graph** 小球按鈕（或點工具列圖示）→ 開啟全螢幕卡通 git graph；操作方式見 README 的「介面」
 - 跟隨 GitHub 的 light / dark 模式（白天 / 星空夜景）；介面語言依瀏覽器語言（繁中 / English）
