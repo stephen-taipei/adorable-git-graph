@@ -6,7 +6,7 @@
 
 用 three.js 畫的動態 git graph，支援 GitHub repo 與本機 repo：每個 commit 是一顆有表情的小球，每條 branch 是流動的管線。唯讀，沒有我們自己的伺服器。
 
-[![Version](https://img.shields.io/badge/version-0.1.0-2563EB?style=flat-square)](package.json)
+[![Release](https://img.shields.io/github/v/release/stephen-taipei/adorable-git-graph?style=flat-square&color=2563EB)](https://github.com/stephen-taipei/adorable-git-graph/releases/latest)
 [![npm](https://img.shields.io/npm/v/@stephen.taipei/adorable-git-graph?style=flat-square&color=CB3837)](https://www.npmjs.com/package/@stephen.taipei/adorable-git-graph)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3_%E2%89%A5116-4285F4?style=flat-square)](#chrome-擴充功能)
 [![Firefox](https://img.shields.io/badge/Firefox-MV3_%E2%89%A5140-FF7139?style=flat-square)](#firefox-附加元件)
