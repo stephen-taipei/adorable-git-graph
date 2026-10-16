@@ -17,6 +17,8 @@
 
 </div>
 
+**[線上 Demo](https://stephen-taipei.github.io/adorable-git-graph/)**：不用安裝，直接在瀏覽器試用。預設顯示這個 repo 自己的歷史，切到 GitHub 分頁可以開任何公開 repo。
+
 [安裝](#安裝) · [介面](#介面) · [主題](#主題) · [鍵盤](#鍵盤) · [隱私與安全](#隱私與安全) · [開發](#開發) · [已知限制](#已知限制) · [完整技術文件](docs/development.md)
 
 ![Adorable Git Graph：git log --graph 式列表，卡通 commit 小球、branch 標籤、作者、日期與 SHA](docs/images/hero.png)

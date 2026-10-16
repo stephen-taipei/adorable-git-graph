@@ -1,0 +1,50 @@
+name: Pages
+
+# 線上 Demo：apps/web 的靜態建置（建置當下這個 repo 的 git 歷史 + 可在瀏覽器裡開任何公開 GitHub repo）。
+# 第一次需要在 repo Settings → Pages → Source 選「GitHub Actions」。PR 只建置檢查，不部署。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 烤進 Demo 的是完整歷史，不是 shallow clone 的一個 commit
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @adorable/web exec vite build --base=/${{ github.event.repository.name }}/
+      # 快照讀取失敗時建置不會中斷，只會得到一個「出錯了」的畫面：確認 HEAD 真的烤進去了
+      - run: grep -q "$(git rev-parse HEAD)" apps/web/dist/assets/index-*.js
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
