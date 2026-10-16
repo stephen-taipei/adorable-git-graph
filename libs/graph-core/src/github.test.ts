@@ -268,6 +268,7 @@ describe('fetchGitHubGraph', () => {
         { name: 'feat/x', sha: sha(3), kind: 'branch', isDefault: false },
       ]);
       expect(g.coverage?.refs.reasons).toContain('branch_page_limit');
+      expect(g.coverage?.refs.reasons).not.toContain('default_branch_unavailable');
       expect(calls.filter((c) => c.includes('matching-refs'))).toHaveLength(2);
     });
 
@@ -290,6 +291,7 @@ describe('fetchGitHubGraph', () => {
       const g = await fetchGitHubGraph('o', 'r', { fetchImpl: impl, maxBranches: 1 });
       expect(g.refs.filter((r) => r.kind === 'branch').map((r) => r.name)).toEqual(['feat']);
       expect(g.coverage?.refs.reasons).toContain('branch_page_limit');
+      expect(g.coverage?.refs.reasons).toContain('default_branch_unavailable');
     });
   });
 

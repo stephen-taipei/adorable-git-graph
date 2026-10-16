@@ -36,7 +36,7 @@ jobs:
           path: apps/extension-firefox/web-ext-artifacts/*.zip
 
   # 真實瀏覽器端到端：mock GitHub API + 暫時 git repo，不碰網路。Linux 上用 playwright-core 對應版本的 Chromium
-  # （Google Chrome 正式版 137 起忽略 --load-extension）。Firefox e2e 需要真正的 Firefox，仍在本機跑（見 docs/development.md）。
+  # （Google Chrome 正式版 137 起忽略 --load-extension）。Firefox e2e 用 runner 預裝的 Firefox + Xvfb（WebGL 需要虛擬顯示器）。
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -47,6 +47,7 @@ jobs:
           - { name: chrome-extension, filter: '@adorable/extension' }
           - { name: web, filter: '@adorable/web' }
           - { name: cli, filter: './apps/cli' }
+          - { name: firefox-extension, filter: '@adorable/extension-firefox' }
     name: e2e (${{ matrix.suite.name }})
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +57,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @adorable/extension exec playwright-core install --with-deps chromium
+      - if: matrix.suite.name != 'firefox-extension'
+        run: pnpm --filter @adorable/extension exec playwright-core install --with-deps chromium
+      - if: matrix.suite.name == 'firefox-extension'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          echo "FIREFOX_PATH=$(command -v firefox)" >> "$GITHUB_ENV"
+          firefox --version
       - run: pnpm --filter '${{ matrix.suite.filter }}' e2e
       - if: failure()
         uses: actions/upload-artifact@v4

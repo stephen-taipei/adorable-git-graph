@@ -352,6 +352,8 @@ export async function fetchGitHubGraph(
     ...(tagsUnavailable ? ['tags_unavailable'] : []),
     ...(picked.length < branches.length ? ['branch_selection'] : []),
     ...(branchPageFull ? ['branch_page_limit'] : []),
+    // 頁滿又補查不到（或補查失敗）：圖裡沒有主線，要讓使用者看得出原因
+    ...(defaultBranch && !headBySha.has(defaultBranch) ? ['default_branch_unavailable'] : []),
     ...(tags.length >= 30 ? ['tag_page_limit'] : []),
     ...(tags.some((t) => !commits.has(t.commit.sha)) ? ['tags_outside_history'] : []),
   ];
