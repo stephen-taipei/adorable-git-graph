@@ -10,7 +10,7 @@
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | 受測 candidate    | `2eb2e47fb3900f9472affde0ce1a6aa9c342e826`                                                                                        |
 | Docs-only PR HEAD | `410aa672adc4d2af6ec0e1ae37f53c2b72dc7ea3`                                                                                        |
-| 分支／PR          | `Solid/rd-diagnostics-claude`／[PR #7](https://github.com/stephen-taipei/adorable-git-grpah/pull/7)                               |
+| 分支／PR          | `Solid/rd-diagnostics-claude`／[PR #7](https://github.com/stephen-taipei/adorable-git-graph/pull/7)                               |
 | 合併              | 以 merge commit 合併至 `main`：`1fe01c3a25049d513f8327c703437652e32ed39a`；合併前確認 HEAD 為 `410aa67`、CI `verify` 通過、無衝突 |
 | 契約              | 原始 `code-change-v1`／`deep` 契約與驗收標準保留                                                                                  |
 

@@ -11,7 +11,7 @@ An animated, three.js git graph for GitHub repositories and your local repos: ev
 [![Chrome](https://img.shields.io/badge/Chrome-MV3_%E2%89%A5116-4285F4?style=flat-square)](#chrome-extension)
 [![Firefox](https://img.shields.io/badge/Firefox-MV3_%E2%89%A5140-FF7139?style=flat-square)](#firefox-add-on)
 [![License](https://img.shields.io/badge/license-Apache--2.0-64748B?style=flat-square)](LICENSE)
-[![CI](https://github.com/stephen-taipei/adorable-git-grpah/actions/workflows/ci.yml/badge.svg)](https://github.com/stephen-taipei/adorable-git-grpah/actions/workflows/ci.yml)
+[![CI](https://github.com/stephen-taipei/adorable-git-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/stephen-taipei/adorable-git-graph/actions/workflows/ci.yml)
 
 **English** · [繁體中文](README.zh-TW.md)
 

@@ -3,9 +3,9 @@ import { parseRepoPath } from './repo';
 
 describe('parseRepoPath', () => {
   it('parses owner/repo from the repo root and sub pages', () => {
-    expect(parseRepoPath('/stephen-taipei/adorable-git-grpah')).toEqual({
+    expect(parseRepoPath('/stephen-taipei/adorable-git-graph')).toEqual({
       owner: 'stephen-taipei',
-      repo: 'adorable-git-grpah',
+      repo: 'adorable-git-graph',
       branchHint: undefined,
     });
     expect(parseRepoPath('/o/r/issues/12')).toMatchObject({ owner: 'o', repo: 'r' });

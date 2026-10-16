@@ -1,6 +1,6 @@
 # RD 診斷：PR #7 review 後續修正驗證紀錄
 
-驗證日期：2026-10-12。本頁記錄 [PR #7](https://github.com/stephen-taipei/adorable-git-grpah/pull/7) review（head `e4fa5cf`）提出的 P1、P2 修正。另存新檔，不覆寫 [rd-open-p1.md](rd-open-p1.md)、[rd-p1-fix-validation.md](rd-p1-fix-validation.md) 或 [rd-validation.md](rd-validation.md) 的既有結果。
+驗證日期：2026-10-12。本頁記錄 [PR #7](https://github.com/stephen-taipei/adorable-git-graph/pull/7) review（head `e4fa5cf`）提出的 P1、P2 修正。另存新檔，不覆寫 [rd-open-p1.md](rd-open-p1.md)、[rd-p1-fix-validation.md](rd-p1-fix-validation.md) 或 [rd-validation.md](rd-validation.md) 的既有結果。
 
 ## 狀態
 

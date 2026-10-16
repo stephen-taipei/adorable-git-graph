@@ -24,13 +24,13 @@
     "three.js",
     "cli"
   ],
-  "homepage": "https://github.com/stephen-taipei/adorable-git-grpah#readme",
+  "homepage": "https://github.com/stephen-taipei/adorable-git-graph#readme",
   "bugs": {
-    "url": "https://github.com/stephen-taipei/adorable-git-grpah/issues"
+    "url": "https://github.com/stephen-taipei/adorable-git-graph/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/stephen-taipei/adorable-git-grpah.git",
+    "url": "git+https://github.com/stephen-taipei/adorable-git-graph.git",
     "directory": "apps/cli"
   },
   "publishConfig": {

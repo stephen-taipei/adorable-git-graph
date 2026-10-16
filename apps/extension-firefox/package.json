@@ -11,7 +11,7 @@
     "package": "web-ext build --source-dir dist --artifacts-dir web-ext-artifacts --overwrite-dest",
     "package:source": "node scripts/package-source.mjs",
     "release": "node scripts/release.mjs",
-    "start": "web-ext run --source-dir dist --start-url https://github.com/stephen-taipei/adorable-git-grpah",
+    "start": "web-ext run --source-dir dist --start-url https://github.com/stephen-taipei/adorable-git-graph",
     "e2e": "node e2e/run.mjs"
   },
   "dependencies": {

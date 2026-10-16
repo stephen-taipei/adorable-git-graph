@@ -25,7 +25,7 @@ const profileDir = resolve(out, '.profile');
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const mock = args.includes('--mock');
 const repoArg = args[args.indexOf('--repo') + 1];
-const repo = args.includes('--repo') && repoArg ? repoArg : 'stephen-taipei/adorable-git-grpah';
+const repo = args.includes('--repo') && repoArg ? repoArg : 'stephen-taipei/adorable-git-graph';
 if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`--repo must be owner/name: ${repo}`);
 const SIZE = { width: 1280, height: 800 };
 
