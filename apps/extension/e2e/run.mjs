@@ -186,6 +186,10 @@ const ctx = await chromium.launchPersistentContext(profileDir, {
     '--use-angle=swiftshader',
     '--enable-unsafe-swiftshader',
     '--ignore-gpu-blocklist',
+    // 假的 github.com（公開位址）載入 mock API 在 127.0.0.1 的頭像，會被 Chromium 的 Local Network Access 擋下
+    // （console 出現 CORS「address space」錯誤，最後的 console 檢查失敗）。正式環境頭像來自 avatars.githubusercontent.com，
+    // 不會遇到；只在 e2e 關掉這項檢查。
+    '--disable-features=LocalNetworkAccessChecks',
   ],
 });
 
