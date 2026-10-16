@@ -1,5 +1,5 @@
 import type { DiagnosticAdapter, DiagnosticRequest } from '@adorable/graph-core';
-import { DIAGNOSTICS_ENDPOINT } from './protocol';
+import { DIAGNOSTICS_ENDPOINT } from '@adorable/git-local/protocol';
 
 /** No filesystem paths or GitHub credentials cross the local diagnostic protocol. */
 export function createLocalAdapter(repo: string): DiagnosticAdapter {

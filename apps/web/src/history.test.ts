@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getMessages } from '@adorable/graph-ui';
 import { HISTORY_PAGE, hasMore, localHistoryError, nextDepth, settled } from './history';
-import { MAX_DEPTH } from './protocol';
+import { MAX_DEPTH } from '@adorable/git-local/protocol';
 import { LOCAL_ONLY } from './localRepos';
 import { locale, messagesFor } from './i18n';
 

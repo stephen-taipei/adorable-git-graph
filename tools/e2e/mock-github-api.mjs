@@ -177,7 +177,8 @@ export function startMock() {
     function arrive(req, res) {
       // Record arrival, not delayed response time: cancelled old requests may finish later.
       const url = new URL(req.url, 'http://x');
-      seen.paths.push(url.pathname + url.search);
+      // 頭像是 <img> 載入，不是 API 呼叫：不算進 seen.paths（「快取命中＝沒有新的 API 請求」之類的斷言只看 API）
+      if (!url.pathname.startsWith('/avatar/')) seen.paths.push(url.pathname + url.search);
       if (req.headers.authorization) seen.auth.push(req.headers.authorization);
       seen.pending++;
       let settled = false;
