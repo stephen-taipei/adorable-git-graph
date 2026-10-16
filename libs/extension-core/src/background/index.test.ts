@@ -124,7 +124,9 @@ const graph = (name: string) => ({
   refs: [],
   fetchedAt: Date.now(),
 });
-const cacheKey = 'cache:o/r##5x60';
+const cacheKey = 'cache:["v2","o","r","",5,60]';
+/** PR #22 以前的格式：整串 toLowerCase，branch 大小寫會被混在一起。 */
+const legacyCacheKey = 'cache:o/r##5x60';
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -767,6 +769,43 @@ describe('background credential scope and fork diagnostics', () => {
     expect(second.data.fromCache).toBe(true);
     expect(second.data.graph.repo.name).toBe('fresh');
     expect(JSON.stringify(second)).not.toContain('credentialScope');
+  });
+  it('keeps branches that differ only by case in separate cache entries', async () => {
+    const store: Data = { settings: { token: '', cacheMinutes: 10 } };
+    const h = await harness(store);
+    mocks.fetch.mockResolvedValueOnce(graph('upper')).mockResolvedValueOnce(graph('lower'));
+    const req = (branchHint: string) =>
+      h.call({ type: 'fetch-graph', owner: 'o', repo: 'r', branchHint });
+    expect((await req('Feature/Login')).data.graph.repo.name).toBe('upper');
+    const lower = await req('feature/login');
+    expect(lower.data.fromCache).toBe(false);
+    expect(lower.data.graph.repo.name).toBe('lower');
+    const again = await req('Feature/Login');
+    expect(again.data.fromCache).toBe(true);
+    expect(again.data.graph.repo.name).toBe('upper');
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    // owner / repo 仍不分大小寫
+    const sameRepo = await h.call({
+      type: 'fetch-graph',
+      owner: 'O',
+      repo: 'R',
+      branchHint: 'feature/login',
+    });
+    expect(sameRepo.data.fromCache).toBe(true);
+    expect(sameRepo.data.graph.repo.name).toBe('lower');
+  });
+  it('ignores entries written in the legacy lower-cased key format', async () => {
+    const store: Data = { settings: { token: '', cacheMinutes: 10 } };
+    const h = await harness(store);
+    mocks.fetch.mockResolvedValue(graph('fresh'));
+    // 讓 credentialScope 對得上，確認是 key 格式（而非憑證檢查）擋掉舊資料
+    await h.call({ type: 'fetch-graph', owner: 'o', repo: 'r' });
+    const scope = (store[cacheKey] as { credentialScope: string }).credentialScope;
+    store[legacyCacheKey] = { savedAt: Date.now(), graph: graph('legacy'), credentialScope: scope };
+    delete store[cacheKey];
+    const res = await h.call({ type: 'fetch-graph', owner: 'o', repo: 'r' });
+    expect(res.data.fromCache).toBe(false);
+    expect(res.data.graph.repo.name).toBe('fresh');
   });
   it('fails closed when invalidation fails and recovers on an explicit cache retry', async () => {
     let fail = true;

@@ -79,6 +79,16 @@ interface ApiBranch {
   commit: { sha: string };
 }
 
+interface ApiRef {
+  ref: string;
+  object?: { sha?: string } | null;
+}
+
+/** branch 名稱可含 `/`：逐段 encode，保留分隔用的 `/`。 */
+function encodeRefPath(name: string): string {
+  return name.split('/').map(encodeURIComponent).join('/');
+}
+
 interface ApiPull {
   head: { ref: string; sha: string; repo?: { full_name?: string } | null };
 }
@@ -216,6 +226,33 @@ export async function fetchGitHubGraph(
   ]);
 
   const headBySha = new Map(branches.map((b) => [b.name, b.commit.sha]));
+  // /branches 只取第一頁（最多 100 條）。頁滿時，預設分支與正在瀏覽的分支可能在後面的頁：
+  // 不靠第一頁碰運氣，改用 matching-refs 定向補查（各一次請求、只在頁滿時發生；失敗不致命，仍標 branch_page_limit）。
+  const branchPageFull = branches.length >= 100;
+  const lookupBranches = async (prefix: string): Promise<void> => {
+    try {
+      const refs = await get<ApiRef[]>(
+        `${repoPath}/git/matching-refs/heads/${encodeRefPath(prefix)}`,
+      );
+      for (const r of refs) {
+        const name = r.ref.startsWith('refs/heads/') ? r.ref.slice('refs/heads/'.length) : '';
+        if (name && r.object?.sha && !headBySha.has(name)) headBySha.set(name, r.object.sha);
+      }
+    } catch (err) {
+      if (opts.signal?.aborted) throw err;
+    }
+  };
+  if (branchPageFull) {
+    const hintParts = opts.branchHint?.split('/').filter(Boolean) ?? [];
+    const firstPageHint = resolveBranchHint(opts.branchHint, [...headBySha.keys()]);
+    await Promise.all([
+      defaultBranch && !headBySha.has(defaultBranch) ? lookupBranches(defaultBranch) : undefined,
+      // 第一頁已命中整段路徑就是最長可能，不必再查；否則用第一段當前綴找出所有候選
+      hintParts.length && firstPageHint !== hintParts.join('/')
+        ? lookupBranches(hintParts[0]!)
+        : undefined,
+    ]);
+  }
   const hint = resolveBranchHint(opts.branchHint, [...headBySha.keys()]);
   const fullName = `${owner}/${repo}`.toLowerCase();
   const prBranches = pulls
@@ -254,7 +291,7 @@ export async function fetchGitHubGraph(
   const refReasons = [
     ...(tagsUnavailable ? ['tags_unavailable'] : []),
     ...(picked.length < branches.length ? ['branch_selection'] : []),
-    ...(branches.length >= 100 ? ['branch_page_limit'] : []),
+    ...(branchPageFull ? ['branch_page_limit'] : []),
     ...(tags.length >= 30 ? ['tag_page_limit'] : []),
     ...(tags.some((t) => !commits.has(t.commit.sha)) ? ['tags_outside_history'] : []),
   ];

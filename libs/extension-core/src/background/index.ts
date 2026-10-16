@@ -190,6 +190,30 @@ async function clearCache() {
   if (keys.length) await chrome.storage.local.remove(keys);
 }
 
+/**
+ * owner / repo 在 GitHub 不分大小寫，所以正規化；branch 名稱分大小寫（`Feature/Login` ≠ `feature/login`），保留原樣。
+ * 結構化成 JSON 避免欄位串接後彼此混淆。舊格式（整串 toLowerCase）的 key 不會再被讀到，由 pruneCache 依 savedAt 淘汰。
+ */
+function graphCacheKey(
+  owner: string,
+  repo: string,
+  branchHint: string | undefined,
+  maxBranches: number,
+  maxCommitsPerBranch: number,
+): string {
+  return (
+    CACHE_PREFIX +
+    JSON.stringify([
+      'v2',
+      owner.toLowerCase(),
+      repo.toLowerCase(),
+      branchHint ?? '',
+      maxBranches,
+      maxCommitsPerBranch,
+    ])
+  );
+}
+
 type GraphRequest = Extract<BgRequest, { type: 'fetch-graph' }>;
 type SettingsScope = Awaited<ReturnType<typeof readScopedSettings>>;
 async function validateSettingsScope(scoped: SettingsScope, signal: AbortSignal): Promise<void> {
@@ -214,18 +238,13 @@ async function fetchGraphScoped(
     assertGeneration(generation, tag);
     const scope = await withinRequest(credentialScope(settings.token), signal);
     assertGeneration(generation, tag);
-    const key = (
-      CACHE_PREFIX +
-      req.owner +
-      '/' +
-      req.repo +
-      '#' +
-      (req.branchHint ?? '') +
-      '#' +
-      settings.maxBranches +
-      'x' +
-      settings.maxCommitsPerBranch
-    ).toLowerCase();
+    const key = graphCacheKey(
+      req.owner,
+      req.repo,
+      req.branchHint,
+      settings.maxBranches,
+      settings.maxCommitsPerBranch,
+    );
     if (!req.force && settings.cacheMinutes > 0) {
       const hit = (await withinRequest(chrome.storage.local.get(key), signal))[key] as
         CacheEntry | undefined;
