@@ -1830,7 +1830,7 @@ try {
     await page.locator('.agg-canvas canvas').waitFor();
     await page.locator('.agg-commit').first().waitFor();
     await page.waitForTimeout(500);
-    assert.equal(seen.paths.length, before, 'expected a cache hit (no new API requests)');
+    assert.deepEqual(seen.paths.slice(before), [], 'expected a cache hit (no new API requests)');
     await page.getByRole('button', { name: L.refresh }).click();
     await waitUntil(() => seen.paths.length > before, 15_000, 'refresh re-fetches');
     await page.locator('.agg-canvas canvas').waitFor();
