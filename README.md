@@ -17,6 +17,8 @@ An animated, three.js git graph for GitHub repositories and your local repos: ev
 
 </div>
 
+**[Live demo](https://stephen-taipei.github.io/adorable-git-graph/)**: try it in the browser, no install. It shows this repo's own history; the GitHub tab opens any public repo.
+
 [Install](#install) · [What you see](#what-you-see) · [Themes](#themes) · [Keyboard](#keyboard) · [Privacy and safety](#privacy-and-safety) · [Development](#development) · [Limitations](#known-limitations) · [Detailed docs](docs/development.md)
 
 ![Adorable Git Graph: a git log --graph style list with cartoon commit balls, branch labels, authors, dates and SHAs](docs/images/hero.png)
