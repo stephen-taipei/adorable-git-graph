@@ -614,7 +614,7 @@ try {
       );
       assert.match(chips.join('|'), /2 tags?|2 個 tag|2 個標籤/i);
       assert.match(chips.join('|'), /3 authors?|3 位/i);
-      assert.match(chips.join('|'), /2 merges?|2 個合併|2 次合併|2 個 merge/i);
+      assert.match(chips.join('|'), /2 merges?|2 次 merge|2 個合併|2 次合併|2 個 merge/i);
       assert.equal(
         await page.locator('.agg-chip--filter').count(),
         0,
@@ -1639,6 +1639,11 @@ try {
         'the fake page scrolls when the overlay is closed',
       );
       await page.evaluate(() => window.scrollTo(0, 0));
+      // 只有佔寬度的傳統捲軸才需要保留 gutter；macOS 預設的覆蓋式捲軸（innerWidth === clientWidth）
+      // 不佔寬度，overlay 不設 gutter 才對（見 Overlay.tsx）
+      const classicScrollbar = await page.evaluate(
+        () => window.innerWidth > document.documentElement.clientWidth,
+      );
       await page.locator('.agg-fab').click();
       await page.locator('.agg-panel').waitFor();
       await page.locator('.agg-commit').first().waitFor({ timeout: 30_000 });
@@ -1647,7 +1652,13 @@ try {
       let st = await pageState();
       assert.equal(st.overflow, 'hidden', '<html> overflow is locked while the overlay is open');
       assert.equal(st.computed, 'hidden');
-      assert.equal(st.gutter, 'stable', 'scrollbar-gutter keeps the background from shifting');
+      assert.equal(
+        st.gutter,
+        classicScrollbar ? 'stable' : '',
+        classicScrollbar
+          ? 'scrollbar-gutter keeps the background from shifting'
+          : 'no scrollbar-gutter with overlay scrollbars (they take no width)',
+      );
       assert.equal(st.y, 0);
 
       // 清單捲到底之後再滾（捲動鏈接不能把頁面帶著走）
