@@ -29,6 +29,6 @@ describe('formatAbsolute', () => {
   it('formats valid dates and returns an empty string for garbage', () => {
     expect(formatAbsolute('2026-10-09T02:00:00Z', 'en')).toMatch(/2026/);
     expect(formatAbsolute('not a date', 'en')).toBe('');
-    expect(formatAbsolute('', 'zh-TW')).toBe('');
+    expect(formatAbsolute('', 'zh-Hant-TW')).toBe('');
   });
 });

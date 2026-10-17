@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { detectLocale } from '@adorable/graph-ui';
+import { getCatalog } from '@adorable/graph-ui';
 import type { TabCommand } from '../shared/messages';
 import { Fab } from './Fab';
 import { Overlay } from './Overlay';
 import { repoStore } from './repoStore';
 import { useThemeId } from './useThemeId';
+import { useLocale } from './useLocale';
 
 export function App() {
   const repo = useSyncExternalStore(repoStore.subscribe, repoStore.getSnapshot);
   const [open, setOpen] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const [themeId, setThemeId] = useThemeId();
+  const [locale, localeSetting, setLocaleSetting] = useLocale();
   const wasOpen = useRef(false);
   useEffect(() => {
     if (wasOpen.current && !open)
@@ -33,7 +35,7 @@ export function App() {
   const close = useCallback(() => setOpen(false), []);
 
   if (!repo) return null;
-  const label = detectLocale() === 'zh-TW' ? '開啟 Git Graph' : 'Open Git Graph';
+  const label = getCatalog(locale).common.openGraph;
   return open ? (
     <Overlay
       repo={repo}
@@ -41,6 +43,9 @@ export function App() {
       epoch={epoch}
       themeId={themeId}
       onThemeIdChange={setThemeId}
+      locale={locale}
+      localeSetting={localeSetting}
+      onLocaleChange={setLocaleSetting}
     />
   ) : (
     <Fab label={label} themeId={themeId} onClick={() => setOpen(true)} />

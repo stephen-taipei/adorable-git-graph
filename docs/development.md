@@ -79,7 +79,7 @@ cd apps/cli && npm publish               # 發布（prepack 會重新建置）�
 然後打開任一 GitHub repo（例如 `https://github.com/stephen-taipei/adorable-git-graph`）：
 
 - 右下角出現 **Git Graph** 小球按鈕（或點工具列圖示）→ 開啟全螢幕卡通 git graph；操作方式見 README 的「介面」
-- 跟隨 GitHub 的 light / dark 模式（白天 / 星空夜景）；介面語言依瀏覽器語言（繁中 / English）
+- 跟隨 GitHub 的 light / dark 模式（白天 / 星空夜景）；介面語言預設依瀏覽器語言，標題列 🌐 可切換（41 種，見[多語系](#多語系)）
 - 開啟時後面的 GitHub 頁面不會被捲動、按鍵不會觸發 GitHub 的快捷鍵（在搜尋框打字很安全）
 
 > 安裝後，**已開啟的 GitHub 分頁需重新整理一次**，content script 才會注入。
@@ -178,6 +178,27 @@ infinite scroll（本機 705 筆 / GitHub mock：捲到底分批載入、不跳�
 找不到 Firefox 時會提示並略過，設了 `CI` 或 `REQUIRE_FIREFOX` 則視為失敗。
 
 三套的截圖輸出到各自的 `e2e/.artifacts/`。Chrome extension 的 e2e 與 `store-assets` 要用 **Chromium**：Google Chrome 正式版（137 起）會忽略 `--load-extension`，extension 不會載入。第一次先執行 `pnpm --filter @adorable/extension exec playwright-core install chromium`，或用 `CHROME_PATH` 指向 Chromium / Chrome for Testing。web app 的 e2e 找不到 Chrome 時設定 `CHROME_PATH`；`FIREFOX_PATH` 指向不存在的檔案會直接報錯（不會悄悄改用別的 Firefox）。
+
+## 多語系
+
+- 字串都在 `libs/graph-ui/src/i18n/locales/<tag>.json`（41 個語系，BCP 47）；形狀以 `en.json` 為準，`zh-Hant-TW.json` 是原始中文文案。
+  缺的 key 執行時退回英文；`catalogs.test.ts` 檢查每個檔案的 key、佔位符（`{n}` 等）、各語言需要的複數形（`Intl.PluralRules`）與商店摘要長度（≤ 132 字）。
+- 新增字串：先加到 `en.json` 與 `zh-Hant-TW.json`，再補其他語系（測試會列出缺的）。複數用 `{ "one": …, "other": … }`，類別依語言而不同（俄文 one/few/many/other、中日韓只有 other）。
+- 語系清單、顯示名稱、瀏覽器語言對應（`zh-CN` → 简体中文、`zh-HK` → 繁體中文（香港）、拉丁美洲西語 → `es-MX`、`no` → `nb`…）在 `i18n/locales.ts`。
+- 選擇：預設跟隨瀏覽器（`navigator.languages`）；🌐 選單的選擇記在 web 的 `localStorage`（`agg.locale`）或 extension 的 `chrome.storage.local`（`locale`）。web 換語言會重新載入頁面；extension 即時切換。
+- 載入：web 每個語系是獨立 chunk，只下載用到的；extension 的 content script 是單一 IIFE，語系檔放在 `dist/locales/`，由 background 讀取（不用 web_accessible_resources）。
+- extension manifest 的 description / 工具列提示用 `_locales/<code>/messages.json`（建置時由語系檔產生）。Chrome 與 Firefox 的代碼不同，也不是每個語系都有：
+
+| 語系                | Chrome               | Firefox    | 語系       | Chrome        | Firefox       |
+| ------------------- | -------------------- | ---------- | ---------- | ------------- | ------------- |
+| zh-Hant-TW          | zh_TW                | zh_TW      | nb         | no            | nb_NO         |
+| zh-Hans             | zh_CN                | zh_CN      | es         | es            | es_ES         |
+| zh-Hant、zh-Hant-HK | —（manifest 用英文） | —          | es-MX      | es_419        | es_MX         |
+| my、km、lo          | —                    | my、km、lo | pt / pt-BR | pt_PT / pt_BR | pt_PT / pt_BR |
+
+其他語系兩邊都用同一個代碼（ja、ko、th、ar…）。沒有對應的語系只影響商店摘要與工具列提示，extension 內的介面仍然是該語言。
+
+- 版面不做 RTL 鏡像（線圖的幾何是由左到右）；阿拉伯文、希伯來文的字串本身由瀏覽器的 bidi 正確顯示。
 
 ## 專案結構
 

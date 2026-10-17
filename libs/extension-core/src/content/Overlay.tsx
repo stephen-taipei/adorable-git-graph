@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { ErrorBoundary, GitGraphViewer, THEME_IDS, detectLocale } from '@adorable/graph-ui';
-import type { ThemeId } from '@adorable/graph-ui';
+import { ErrorBoundary, GitGraphViewer, THEME_IDS, getCatalog } from '@adorable/graph-ui';
+import type { Locale, LocaleSetting, ThemeId } from '@adorable/graph-ui';
 import { sendToBackground } from '../shared/messages';
 import type { RepoRef } from '../shared/repo';
 import { useGraph } from './useGraph';
@@ -9,11 +9,11 @@ import { useDetailSize } from './useDetailSize';
 import { useGithubColorMode } from './useGithubColorMode';
 
 const THEME_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈', halloween: '🎃' };
-const THEME_LABEL: Record<ThemeId, [zh: string, en: string]> = {
-  candy: ['主題：糖果（點一下切換）', 'Theme: Candy (click to switch)'],
-  hacker: ['主題：駭客小惡魔（點一下切換）', 'Theme: Hacker imp (click to switch)'],
-  halloween: ['主題：萬聖節南瓜（點一下切換）', 'Theme: Halloween pumpkin (click to switch)'],
-};
+const THEME_LABEL_KEY = {
+  candy: 'themeIdCandy',
+  hacker: 'themeIdHacker',
+  halloween: 'themeIdHalloween',
+} as const satisfies Record<ThemeId, string>;
 
 export function Overlay({
   repo,
@@ -21,12 +21,18 @@ export function Overlay({
   epoch = 0,
   themeId,
   onThemeIdChange,
+  locale,
+  localeSetting,
+  onLocaleChange,
 }: {
   repo: RepoRef;
   onClose: () => void;
   epoch?: number;
   themeId: ThemeId;
   onThemeIdChange: (id: ThemeId) => void;
+  locale: Locale;
+  localeSetting: LocaleSetting;
+  onLocaleChange: (next: LocaleSetting) => void;
 }) {
   const { state, refresh, diagnostics, diagnosticGeneration, loadMore, history } = useGraph(
     repo,
@@ -35,7 +41,7 @@ export function Overlay({
   const [detailSize, setDetailSize] = useDetailSize();
   const [animationOff, setAnimationOff] = useAnimationOff();
   const colorMode = useGithubColorMode();
-  const themeLabel = THEME_LABEL[themeId][detectLocale() === 'zh-TW' ? 0 : 1];
+  const themeLabel = getCatalog(locale).common[THEME_LABEL_KEY[themeId]];
   const panelRef = useRef<HTMLDivElement>(null);
   const downOnBackdrop = useRef(false);
 
@@ -121,7 +127,7 @@ export function Overlay({
         aria-modal="true"
         aria-label={`Git graph · ${repo.owner}/${repo.repo}`}
       >
-        <ErrorBoundary onClose={onClose}>
+        <ErrorBoundary onClose={onClose} locale={locale}>
           <GitGraphViewer
             title={`${repo.owner}/${repo.repo}`}
             state={state}
@@ -141,6 +147,9 @@ export function Overlay({
             }
             theme={colorMode}
             themeId={themeId}
+            locale={locale}
+            localeSetting={localeSetting}
+            onLocaleChange={onLocaleChange}
             actionsExtra={
               <button
                 type="button"

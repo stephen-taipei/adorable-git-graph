@@ -18,6 +18,7 @@
 // 注意：WebGL 走 SwiftShader 軟體繪圖，CPU 吃緊時很慢，所以全部以「等狀態」為主、timeout 開得很寬。
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2368,7 +2369,11 @@ try {
               minSize: Math.min(...btns.map((b) => b.width)),
             };
           });
-          assert.equal(fit.count, 7, 'all seven header buttons are rendered');
+          assert.equal(
+            fit.count,
+            8,
+            'all eight header buttons are rendered (incl. the 🌐 language menu)',
+          );
           assert.equal(fit.inside, true, 'every header button fits inside the overlay at 320px');
           assert.ok(fit.minSize >= 36, `touch targets stay at least 36px (${fit.minSize})`);
         } finally {
@@ -2379,6 +2384,69 @@ try {
       } finally {
         await closeOverlay();
         await sw.evaluate(() => chrome.storage.local.remove('themeId'));
+      }
+    },
+  );
+
+  await step(
+    'language menu: defaults to the browser language, switches the overlay and FAB live, remembered in extension storage',
+    async () => {
+      const catalog = (tag) =>
+        JSON.parse(
+          readFileSync(resolve(root, `../../libs/graph-ui/src/i18n/locales/${tag}.json`), 'utf8'),
+        );
+      const ja = catalog('ja');
+      const en = catalog('en');
+      const menu = () => page.locator('.agg-lang select');
+      const rootLang = () => ui((r) => r.lang);
+      const refreshLabel = () =>
+        ui((r) => [...r.querySelectorAll('.agg-actions button')].map((b) => b.ariaLabel));
+      const stored = () =>
+        sw.evaluate(async () => (await chrome.storage.local.get('locale')).locale ?? null);
+      try {
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('locale'));
+        await openOverlay();
+        // 瀏覽器是 en-US：預設（自動）就是英文
+        assert.equal(await menu().inputValue(), 'auto', 'starts on automatic');
+        assert.equal(await rootLang(), 'en', 'automatic follows the browser language');
+        assert.equal(await menu().getAttribute('aria-label'), en.common.language);
+        assert.equal(await menu().locator('option').count(), 42, 'automatic + 41 languages');
+
+        await menu().selectOption('ja');
+        await eventually(rootLang, 'ja', 'the overlay switches to Japanese without a reload');
+        await eventually(stored, 'ja', 'the choice is saved in extension storage');
+        await eventually(
+          () => refreshLabel().then((l) => l.includes(ja.viewer.refresh)),
+          true,
+          'header buttons are labelled in Japanese',
+        );
+        assert.equal(await menu().getAttribute('aria-label'), ja.common.language);
+        await shot(page, '12-language-ja.png');
+        await closeOverlay();
+        assert.equal(
+          await page.locator('.agg-fab').getAttribute('aria-label'),
+          ja.common.openGraph,
+          'the FAB follows the language',
+        );
+
+        // 新的 content script：第一次打開就是存過的語言
+        await page.reload();
+        await page.locator('.agg-fab').waitFor({ timeout: 10_000 });
+        await eventually(
+          () => page.locator('.agg-fab').getAttribute('aria-label'),
+          ja.common.openGraph,
+          'still Japanese after a page reload',
+        );
+        await openOverlay();
+        assert.equal(await rootLang(), 'ja');
+
+        await menu().selectOption('auto');
+        await eventually(rootLang, 'en', 'automatic goes back to the browser language');
+        await eventually(stored, 'auto', 'automatic is saved too');
+      } finally {
+        await closeOverlay();
+        await sw.evaluate(() => chrome.storage.local.remove('locale'));
       }
     },
   );

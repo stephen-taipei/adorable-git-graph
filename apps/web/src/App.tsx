@@ -14,7 +14,7 @@ import { TokenDialog } from './TokenDialog';
 import { searchFromSource, sourceFromSearch } from './source';
 import type { Source } from './source';
 import { useStored } from './storage';
-import { locale, t } from './i18n';
+import { changeLocale, locale, localeSetting, t } from './i18n';
 import { clearGitHubCache, useGraphSource } from './useGraphSource';
 import { DEFAULT_REPO } from '@adorable/git-local/protocol';
 import { useThemeStylesheet } from './useThemeStylesheet';
@@ -33,11 +33,8 @@ import { HAS_SERVER } from './runtime';
 const isDetailSize = (v: string): v is DetailSize => v === 'normal' || v === 'wide';
 
 const THEME_ID_ICON: Record<ThemeId, string> = { candy: '🍬', hacker: '😈', halloween: '🎃' };
-const THEME_ID_LABEL: Record<ThemeId, string> = {
-  candy: t.themeIdCandy,
-  hacker: t.themeIdHacker,
-  halloween: t.themeIdHalloween,
-};
+const themeIdLabel = (id: ThemeId): string =>
+  ({ candy: t.themeIdCandy, hacker: t.themeIdHacker, halloween: t.themeIdHalloween })[id];
 
 function usePrefersDark(): boolean {
   const query = '(prefers-color-scheme: dark)';
@@ -187,6 +184,8 @@ export function App() {
         theme={theme}
         themeId={viewerThemeId}
         locale={locale}
+        localeSetting={localeSetting}
+        onLocaleChange={changeLocale}
         sourceKey={sourceKey}
         viewerStateKey={viewerStateKey}
         onRefresh={refresh}
@@ -211,8 +210,8 @@ export function App() {
               <button
                 type="button"
                 className="web-icon web-skin"
-                title={THEME_ID_LABEL[themeId]}
-                aria-label={THEME_ID_LABEL[themeId]}
+                title={themeIdLabel(themeId)}
+                aria-label={themeIdLabel(themeId)}
                 onClick={() =>
                   setThemeId(THEME_IDS[(THEME_IDS.indexOf(themeId) + 1) % THEME_IDS.length]!)
                 }
@@ -255,11 +254,7 @@ export function App() {
                   setAuth(adopted);
                 }
                 setDialogRevision((n) => n + 1);
-                setTokenError(
-                  locale === 'zh-TW'
-                    ? '另一個分頁已變更 GitHub token，這次未儲存。已載入目前設定，請確認後再試。'
-                    : 'GitHub token was changed in another tab, so nothing was saved. The current settings are loaded; review them and retry.',
-                );
+                setTokenError(t.tokenConflict);
                 return;
               }
               // A partial write may have persisted the new token. An unused,
@@ -270,11 +265,7 @@ export function App() {
               const failed = { ...current, nonce: ephemeralScope(), tokenReadable: false };
               authRef.current = failed;
               setAuth(failed);
-              setTokenError(
-                locale === 'zh-TW'
-                  ? '設定尚未確認保存。請允許瀏覽器儲存後重試。'
-                  : 'Could not confirm saving settings. Allow browser storage and retry.',
-              );
+              setTokenError(t.tokenSaveFailed);
               return;
             }
             setTokenOpen(false);

@@ -12,116 +12,16 @@ import {
   type PinnedRef,
   type PullRequestSummary,
 } from '@adorable/graph-core';
-import type { Locale } from '../i18n';
+import { getCatalog } from '../i18n';
+import type { Catalog, Locale } from '../i18n';
 import { copyText } from './format';
 
-const wording = {
-  title: ['比較與變更', 'Compare & changes'],
-  graph: ['圖形涵蓋範圍', 'Graph coverage'],
-  source: ['來源', 'Source'],
-  refs: ['Refs', 'Refs'],
-  commits: ['Commits', 'Commits'],
-  files: ['變更檔案', 'Changed files'],
-  patch: ['Diff', 'Diff'],
-  observed: ['取得時間', 'Observed at'],
-  unknown: ['未知', 'Unknown'],
-  complete: ['完整', 'Complete'],
-  partial: ['部分', 'Partial'],
-  unavailable: ['無法取得', 'Unavailable'],
-  base: ['Base', 'Base'],
-  head: ['Head', 'Head'],
-  compare: ['比較', 'Compare'],
-  loading: ['載入中…', 'Loading…'],
-  failed: [
-    '查詢無法完成。請重新查詢或核對來源權限。',
-    'Query unavailable. Retry or check source permissions.',
-  ],
-  ahead: ['Head 獨有 commit 數', 'Head-only count'],
-  behind: ['Base 獨有 commit 數', 'Base-only count'],
-  ancestor: ['Base 是 head 的祖先', 'Base is an ancestor of head'],
-  yes: ['是', 'Yes'],
-  no: ['否', 'No'],
-  mergeBase: ['Merge base', 'Merge base'],
-  semantics: ['檔案語意：merge-base → head', 'File semantics: merge-base → head'],
-  note: [
-    '祖先關係不代表 patch 等價、修改目前仍有效或已部署。',
-    'Ancestry does not establish patch equivalence, current effectiveness, or deployment.',
-  ],
-  selected: ['Commit 變更', 'Commit changes'],
-  select: [
-    '選取 commit 後可查看 parent → commit 的變更。',
-    'Select a commit to inspect parent → commit changes.',
-  ],
-  parent: ['比較 parent', 'Compare parent'],
-  root: ['已確認 root：empty tree → commit', 'Verified root: empty tree → commit'],
-  copy: ['複製含 SHA 的摘要', 'Copy summary with SHAs'],
-  copied: ['已複製', 'Copied'],
-  copyFailed: ['複製失敗', 'Copy failed'],
-  usePr: ['使用 PR base/head', 'Use PR base/head'],
-  none: ['完整清單沒有項目。', 'No entries in the complete list.'],
-  incomplete: ['此清單不足以判定沒有變更。', 'This list cannot establish absence of changes.'],
-  disabled: [
-    '此來源只提供快照，無法查詢比較與變更。',
-    'This source provides a snapshot only; compare & changes are unavailable.',
-  ],
-  textMissing: [
-    '未取得文字 patch。可能是 binary、大型檔案或來源未提供。',
-    'Text patch unavailable: binary, large, or omitted by the provider.',
-  ],
-  localRemote: [
-    'Remote refs 是本機觀察值。未執行 fetch。',
-    'Remote refs are local observations. No fetch was run.',
-  ],
-  reasons: ['完整性說明', 'Coverage notes'],
-  github: ['回 GitHub 核對', 'Verify on GitHub'],
-  binary: ['Binary', 'Binary'],
-  draft: ['草稿', 'Draft'],
-  fullSha: ['固定 SHA', 'Pinned SHA'],
-  open: ['開啟比較與變更', 'Open compare & changes'],
-  close: ['收合比較與變更', 'Close compare & changes'],
-} as const;
-type Key = keyof typeof wording;
-const tr = (loc: Locale, key: Key) => wording[key][loc === 'zh-TW' ? 0 : 1];
+type Key = Exclude<keyof Catalog['diag'], 'reasonLabels'>;
+const tr = (loc: Locale, key: Key) => getCatalog(loc).diag[key];
 const time = (value: number | undefined) =>
   value !== undefined && Number.isFinite(value) ? new Date(value).toISOString() : 'unknown';
-const reasonLabels: Record<string, [string, string]> = {
-  history_limit: ['歷史讀取達上限', 'History limit'],
-  display_window: ['圖形顯示範圍有限', 'Display window'],
-  branch_selection: ['只載入選取分支', 'Selected branches only'],
-  branch_page_limit: ['分支清單可能超過一頁', 'Branch page limit'],
-  default_branch_unavailable: [
-    '找不到預設分支，圖中沒有主線',
-    'Default branch not found; the main line is missing',
-  ],
-  tag_page_limit: ['Tag 清單可能超過一頁', 'Tag page limit'],
-  tags_unavailable: ['Tag 查詢失敗，無法確認完整清單', 'Tag query failed; full list unknown'],
-  tags_outside_history: ['Tag 可能位於已載入歷史之外', 'Tags outside loaded history'],
-  shallow_history: ['Shallow 歷史不足', 'Shallow history'],
-  file_limit: ['檔案清單達上限', 'File limit'],
-  patch_limit: ['Patch 已截斷', 'Patch truncated'],
-  patch_truncated: ['Patch 已截斷', 'Patch truncated'],
-  exact_patch_unavailable: [
-    '此 Git 環境無法確認單檔 diff 的範圍',
-    'This Git environment cannot guarantee exact single-file diff scope',
-  ],
-  statistics_unavailable: ['部分統計無法取得', 'Statistics unavailable'],
-  missing_objects: ['缺少 Git 物件', 'Missing Git objects'],
-  refs_unavailable: ['Ref 無法解析', 'Refs unavailable'],
-  no_common_ancestor: [
-    '沒有共同祖先；檔案比較無法使用',
-    'No common ancestor; file comparison unavailable',
-  ],
-  multiple_merge_bases: [
-    '有多個 merge base；未選擇檔案基準',
-    'Multiple merge bases; no file base selected',
-  ],
-  commit_limit: ['獨有 commit 清單達上限', 'Unique commit limit'],
-  provider_patch_completeness_unknown: [
-    '無法確認來源 patch 是否完整',
-    'Provider patch completeness unknown',
-  ],
-  patch_missing_binary_or_large: ['來源未提供 patch', 'Provider omitted patch'],
-};
+const reasonLabel = (loc: Locale, reason: string): string | undefined =>
+  (getCatalog(loc).diag.reasonLabels as Record<string, string>)[reason];
 function CoverageText({ value, locale }: { value?: Coverage; locale: Locale }) {
   return (
     <span className="agg-diag-coverage-text">
@@ -132,9 +32,7 @@ function CoverageText({ value, locale }: { value?: Coverage; locale: Locale }) {
           <summary>{tr(locale, 'reasons')}</summary>
           <ul>
             {value!.reasons.map((reason, i) => (
-              <li key={i}>
-                {reasonLabels[reason]?.[locale === 'zh-TW' ? 0 : 1] ?? tr(locale, 'incomplete')}
-              </li>
+              <li key={i}>{reasonLabel(locale, reason) ?? tr(locale, 'incomplete')}</li>
             ))}
           </ul>
         </details>
@@ -146,7 +44,7 @@ export function CoverageNotice({ layout, locale }: { layout: GraphLayout; locale
   return (
     <aside className="agg-diag-coverage" aria-label={tr(locale, 'graph')}>
       <strong>{tr(locale, 'graph')}</strong>
-      {layout.truncated && <span>{locale === 'zh-TW' ? '歷史已截斷' : 'History truncated'}</span>}
+      {layout.truncated && <span>{tr(locale, 'historyTruncated')}</span>}
       <span>
         {tr(locale, 'source')}: {layout.coverage?.source ?? 'unknown'}
       </span>

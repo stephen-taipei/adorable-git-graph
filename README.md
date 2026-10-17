@@ -19,7 +19,7 @@ An animated, three.js git graph for GitHub repositories and your local repos: ev
 
 **[Live demo](https://stephen-taipei.github.io/adorable-git-graph/)**: try it in the browser, no install. It shows this repo's own history; the GitHub tab opens any public repo.
 
-[Install](#install) · [What you see](#what-you-see) · [Themes](#themes) · [Keyboard](#keyboard) · [Privacy and safety](#privacy-and-safety) · [Development](#development) · [Limitations](#known-limitations) · [Detailed docs](docs/development.md)
+[Install](#install) · [What you see](#what-you-see) · [Themes](#themes) · [Languages](#languages) · [Keyboard](#keyboard) · [Privacy and safety](#privacy-and-safety) · [Development](#development) · [Limitations](#known-limitations) · [Detailed docs](docs/development.md)
 
 ![Adorable Git Graph: a git log --graph style list with cartoon commit balls, branch labels, authors, dates and SHAs](docs/images/hero.png)
 
@@ -112,6 +112,10 @@ Three themes, each with a light and a dark scheme. The choice is remembered.
 | The default: pastel colors, a green blob mascot | Neon terminal colors, an imp mascot, commit balls grow horns | Orange and purple, a pumpkin mascot, commit balls wear witch hats |
 
 ![The Hacker imp theme in dark mode](docs/images/themes.png)
+
+## Languages
+
+The interface comes in 41 languages. It follows your browser language; pick another one from the 🌐 menu in the header (the choice is remembered, and "Automatic" goes back to the browser language).
 
 ## Keyboard
 
