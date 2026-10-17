@@ -1320,13 +1320,13 @@
 }
 
 .agg-root[data-size='narrow'] .agg-title {
-  flex: 1 1 140px;
+  /* 手機寬（390px）時標題與 6 顆按鈕（含 🌐）仍在同一行；標題太長就省略 */
+  flex: 1 1 96px;
   max-width: none;
 }
 
-/* 很窄（320px 觸控）時按鈕一排放不下（多了 🌐 語言選單）：換成兩排，不裁掉關閉鈕 */
+/* 很窄（320px 觸控）時按鈕一排放不下（多了 🌐 語言選單）：整排先換到標題下一行，連那一行都放不下才換成兩排 */
 .agg-root[data-size='narrow'] .agg-actions {
-  flex-shrink: 1;
   flex-wrap: wrap;
   justify-content: flex-end;
   max-width: 100%;
