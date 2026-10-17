@@ -19,6 +19,8 @@ export type BgRequest =
   | { type: 'open-options' }
   | { type: 'rate-limit' }
   | { type: 'clear-cache' }
+  /** 介面語系的字串（extension 的 locales/<tag>.json） */
+  | { type: 'locale-catalog'; locale: string }
   | {
       type: 'diagnostic';
       owner: string;
@@ -50,6 +52,9 @@ export type RateLimitResponse = BgResponse<{
   reset: number;
   authenticated: boolean;
 }>;
+
+/** 語系字串（JSON，形狀見 graph-ui 的 locales/en.json） */
+export type LocaleCatalogResponse = BgResponse<unknown>;
 
 export type TabCommand = { type: 'toggle' } | { type: 'data-invalidated' };
 

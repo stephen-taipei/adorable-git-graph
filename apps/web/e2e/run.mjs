@@ -3024,7 +3024,7 @@ try {
       watchErrors(zh, 'zh-TW page');
       await zh.goto(base);
       await zh.locator('.agg-title-text', { hasText: 'octo/cat' }).waitFor();
-      assert.equal(await zh.evaluate(() => document.documentElement.lang), 'zh-TW');
+      assert.equal(await zh.evaluate(() => document.documentElement.lang), 'zh-Hant-TW');
       const stats = await zh.locator('.agg-stats .agg-chip').allInnerTexts();
       assert.equal(stats[0], `${expected} 個 commit`);
       assert.equal(stats[1], `${gitBranches(repoDir).length} 條分支`);
@@ -3074,6 +3074,75 @@ try {
       await zhCtx.close();
     }
   });
+
+  await step(
+    'language menu: browser language by default (zh-CN → 简体中文), switch reloads and is remembered, back to automatic',
+    async () => {
+      const catalog = (tag) =>
+        JSON.parse(
+          readFileSync(resolve(root, `../../libs/graph-ui/src/i18n/locales/${tag}.json`), 'utf8'),
+        );
+      const hans = catalog('zh-Hans');
+      const th = catalog('th');
+      const ctx = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        locale: 'zh-CN',
+      });
+      ctx.setDefaultTimeout(30_000 * SCALE);
+      ctx.setDefaultNavigationTimeout(30_000 * SCALE);
+      try {
+        const pg = await ctx.newPage();
+        shotPage = pg;
+        watchErrors(pg, 'language page');
+        const lang = () => pg.evaluate(() => document.documentElement.lang);
+        const menu = () => pg.locator('.agg-lang select');
+        const stored = () => pg.evaluate(() => localStorage.getItem('agg.locale'));
+        const ready = () => pg.locator('.agg-title-text', { hasText: 'octo/cat' }).waitFor();
+        await pg.goto(base);
+        await ready();
+        assert.equal(await lang(), 'zh-Hans', 'zh-CN maps to Simplified Chinese');
+        assert.equal(await menu().inputValue(), 'auto');
+        assert.equal(await menu().getAttribute('aria-label'), hans.common.language);
+        assert.equal(await menu().locator('option').count(), 42, 'automatic + 41 languages');
+        assert.equal(
+          await pg.getByRole('button', { name: hans.viewer.refresh, exact: true }).count(),
+          1,
+          'header is in Simplified Chinese',
+        );
+
+        // 換語言：記住並重新載入（網址保留目前的 repo）
+        await Promise.all([pg.waitForEvent('load'), menu().selectOption('th')]);
+        await ready();
+        assert.equal(await lang(), 'th');
+        assert.equal(await stored(), 'th');
+        assert.equal(await menu().inputValue(), 'th');
+        for (const name of [th.viewer.refresh, th.viewer.settings, th.viewer.replay])
+          assert.equal(
+            await pg.getByRole('button', { name, exact: true }).count(),
+            1,
+            `button ${name}`,
+          );
+        assert.equal(
+          await pg.locator('.agg-search input').getAttribute('aria-label'),
+          th.viewer.searchLabel,
+        );
+        await pg.screenshot({ path: resolve(artifacts, 'language-th.png') });
+
+        // 重新整理後還是泰文
+        await pg.reload();
+        await ready();
+        assert.equal(await lang(), 'th', 'still Thai after a reload');
+
+        await Promise.all([pg.waitForEvent('load'), menu().selectOption('auto')]);
+        await ready();
+        assert.equal(await lang(), 'zh-Hans', 'automatic follows the browser again');
+        assert.equal(await stored(), null, 'automatic clears the stored choice');
+        await pg.close();
+      } finally {
+        await ctx.close();
+      }
+    },
+  );
 
   // ═════════════════════════ 本機 repo 選擇器（dev server） ═════════════════════════
   // AGG_REPO_ROOTS = fx.rootsDir：清單只有 預設 repo（★）、beta、group/gamma；其他（略過的資料夾 / symlink / 範圍外）都不能出現。

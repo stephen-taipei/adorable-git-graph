@@ -1,6 +1,7 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { detectLocale, getMessages } from '../i18n';
+import type { Locale } from '../i18n';
 import { Mascot } from './Mascot';
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
   onClose?: () => void;
   /** 預設錯誤頁多一個「重新載入頁面」按鈕。只適合獨立的 web app；extension 不可以（會連 GitHub 的分頁一起重載）。 */
   reloadable?: boolean;
+  /** 錯誤頁的語系；預設依瀏覽器語言。 */
+  locale?: Locale;
 }
 
 interface State {
@@ -46,7 +49,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
     if (this.props.fallback) return this.props.fallback(error, this.reset);
 
-    const t = getMessages(detectLocale());
+    const t = getMessages(this.props.locale ?? detectLocale());
     return (
       <div
         className="agg-root"

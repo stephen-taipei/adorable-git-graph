@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { GraphLayout, GraphNode } from '@adorable/graph-core';
-import { getMessages } from '../i18n.ts';
+import { getMessages, loadLocale } from '../i18n/index.ts';
+import { loadBundledLocale } from '../i18n/bundled.ts';
 import {
   autoLoadKey,
   historyErrorText,
@@ -98,7 +99,11 @@ describe('autoLoadKey', () => {
 
 describe('historyErrorText', () => {
   const en = getMessages('en');
-  const zh = getMessages('zh-TW');
+  let zh = getMessages('zh-Hant-TW');
+  beforeAll(async () => {
+    await loadLocale('zh-Hant-TW', loadBundledLocale);
+    zh = getMessages('zh-Hant-TW');
+  });
   it('adds the prefix once and translates error codes', () => {
     expect(historyErrorText(en, undefined)).toBe('Could not load older history');
     expect(historyErrorText(en, '  ')).toBe('Could not load older history');

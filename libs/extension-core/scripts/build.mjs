@@ -16,6 +16,37 @@ import { createManifest } from './manifest.mjs';
 
 const libRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+const localesDir = resolve(libRoot, '../graph-ui/src/i18n/locales');
+
+/**
+ * 介面語系：
+ *   locales/<tag>.json             content script（經 background）與 options page 讀的完整字串
+ *   _locales/<code>/messages.json  manifest 的 description / action 標題（瀏覽器依自己的語言挑）
+ * 兩個瀏覽器的 _locales 代碼不同、也不是每個語系都有：對照表在 graph-ui 的 i18n/locales.ts。
+ * @param {'chrome' | 'firefox'} target
+ * @param {string} outDir
+ */
+async function writeLocales(target, outDir) {
+  const { LOCALES } = await import(resolve(localesDir, '../locales.ts'));
+  await mkdir(resolve(outDir, 'locales'), { recursive: true });
+  for (const l of LOCALES) {
+    const raw = await readFile(resolve(localesDir, `${l.tag}.json`), 'utf8');
+    await writeFile(resolve(outDir, 'locales', `${l.tag}.json`), JSON.stringify(JSON.parse(raw)));
+    const code = l[target];
+    if (!code) continue;
+    const { manifest } = JSON.parse(raw);
+    const messages = {
+      description: { message: manifest.description },
+      actionTitle: { message: manifest.actionTitle },
+    };
+    await mkdir(resolve(outDir, '_locales', code), { recursive: true });
+    await writeFile(
+      resolve(outDir, '_locales', code, 'messages.json'),
+      `${JSON.stringify(messages, null, 2)}\n`,
+    );
+  }
+}
+
 /**
  * @param {object} o
  * @param {'chrome' | 'firefox'} o.target
@@ -70,6 +101,7 @@ export async function buildExtension({ target, appRoot, watch = false, env = pro
   await cp(resolve(libRoot, 'assets/icons'), resolve(outDir, 'icons'), { recursive: true });
   const manifest = createManifest({ target, version: pkg.version, apiBase, extraMatches });
   await writeFile(resolve(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeLocales(target, outDir);
 
   await iife('AdorableGitGraphContent', 'src/content/index.tsx', 'content.js');
   await iife('AdorableGitGraphBackground', 'src/background/index.ts', 'background.js');

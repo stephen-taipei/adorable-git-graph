@@ -10,6 +10,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./i18n/bundled": "./src/i18n/bundled.ts",
+    "./i18n/locales": "./src/i18n/locales.ts",
+    "./locales/*.json": "./src/i18n/locales/*.json",
     "./viewer.css": "./src/viewer/viewer.css",
     "./themes/*.css": "./src/themes/*.css"
   },

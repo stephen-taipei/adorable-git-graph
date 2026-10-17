@@ -5,6 +5,7 @@ export * from './viewer/GitGraphViewer';
 export * from './viewer/useStableLayout';
 export * from './viewer/ErrorBoundary';
 export * from './viewer/Mascot';
+export * from './viewer/LanguagePicker';
 export * from './themes/config';
 export * from './i18n';
 import viewerCss from './viewer/viewer.css?inline';

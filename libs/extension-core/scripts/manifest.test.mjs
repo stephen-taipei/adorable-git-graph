@@ -46,6 +46,14 @@ describe('createManifest', () => {
     },
   );
 
+  it.each(['chrome', 'firefox'])('%s: store texts come from _locales (default en)', (target) => {
+    const m = createManifest({ ...base, target });
+    expect(m.name).toBe('Adorable Git Graph');
+    expect(m.default_locale).toBe('en');
+    expect(m.description).toBe('__MSG_description__');
+    expect(m.action.default_title).toBe('__MSG_actionTitle__');
+  });
+
   it('only adds extra hosts / matches when explicitly asked (e2e builds), never by default', () => {
     const prod = createManifest({ ...base, target: 'firefox' });
     expect(JSON.stringify(prod)).not.toMatch(/127\.0\.0\.1|localhost/);

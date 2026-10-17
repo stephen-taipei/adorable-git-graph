@@ -58,7 +58,8 @@ label span {
   font-weight: 900;
 }
 
-input {
+input,
+.lang select {
   width: 100%;
   padding: 8px 12px;
   font: inherit;
@@ -68,7 +69,8 @@ input {
   border-radius: 14px;
 }
 
-input:focus-visible {
+input:focus-visible,
+.lang select:focus-visible {
   outline: 3px solid #5b8cff;
   outline-offset: 2px;
 }

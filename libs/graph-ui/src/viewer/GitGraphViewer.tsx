@@ -3,7 +3,8 @@ import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'reac
 import { branchesContaining, isRateLimitLow } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphLayout, GraphNode } from '@adorable/graph-core';
 import { detectLocale, formatDuration, formatRelative, getMessages } from '../i18n';
-import type { Locale } from '../i18n';
+import type { Locale, LocaleSetting } from '../i18n';
+import { LanguagePicker } from './LanguagePicker';
 import {
   LAYOUT,
   anchoredScrollTop,
@@ -69,6 +70,12 @@ export interface GitGraphViewerProps {
   /** Visual theme (see themes/config.ts); its stylesheet must be loaded by the host. */
   themeId?: ThemeId;
   locale?: Locale;
+  /**
+   * 介面語言的設定（標題列的 🌐 選單）。給了 onLocaleChange 才顯示選單；
+   * 使用端負責記住設定、載入語系字串，再把新的 `locale` 傳進來。
+   */
+  localeSetting?: LocaleSetting;
+  onLocaleChange?: (setting: LocaleSetting) => void;
   onRefresh?: () => void;
   onClose?: () => void;
   onOpenSettings?: () => void;
@@ -120,6 +127,8 @@ export function GitGraphViewer({
   theme = AUTO_SCHEME,
   themeId = DEFAULT_THEME,
   locale,
+  localeSetting = 'auto',
+  onLocaleChange,
   onRefresh,
   onClose,
   onOpenSettings,
@@ -564,6 +573,7 @@ export function GitGraphViewer({
   return (
     <div
       className="agg-root"
+      lang={loc}
       ref={rootRef}
       data-theme={scheme.tone}
       data-scheme={scheme.id}
@@ -602,8 +612,8 @@ export function GitGraphViewer({
             type="button"
             className="agg-btn"
             aria-pressed={animationOff}
-            aria-label={loc === 'zh-TW' ? '關閉動畫' : 'Disable animations'}
-            title={loc === 'zh-TW' ? '關閉動畫' : 'Disable animations'}
+            aria-label={t.disableAnimations}
+            title={t.disableAnimations}
             onClick={toggleAnimationOff}
           >
             ◷
@@ -634,6 +644,14 @@ export function GitGraphViewer({
             >
               <RefreshIcon />
             </IconButton>
+          )}
+          {onLocaleChange && (
+            <LanguagePicker
+              locale={loc}
+              setting={localeSetting}
+              detected={detectLocale()}
+              onChange={onLocaleChange}
+            />
           )}
           {actionsExtra}
           {onOpenSettings && (

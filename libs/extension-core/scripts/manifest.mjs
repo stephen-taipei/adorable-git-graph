@@ -52,7 +52,9 @@ export function createManifest({
     manifest_version: 3,
     name: 'Adorable Git Graph',
     version,
-    description: 'Cartoon-style animated git graph for any GitHub repository, powered by three.js.',
+    // 商店摘要與工具列提示依瀏覽器語言顯示：字串在 _locales/<code>/messages.json（build.mjs 由 graph-ui 的語系檔產生）
+    default_locale: 'en',
+    description: '__MSG_description__',
     icons: {
       16: 'icons/icon-16.png',
       32: 'icons/icon-32.png',
@@ -60,7 +62,7 @@ export function createManifest({
       128: 'icons/icon-128.png',
     },
     action: {
-      default_title: 'Toggle Git Graph',
+      default_title: '__MSG_actionTitle__',
       default_icon: { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png' },
     },
     content_scripts: [

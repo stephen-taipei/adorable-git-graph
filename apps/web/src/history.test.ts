@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { getMessages } from '@adorable/graph-ui';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { getMessages, loadLocale } from '@adorable/graph-ui';
+import { loadBundledLocale } from '@adorable/graph-ui/i18n/bundled';
 import { HISTORY_PAGE, hasMore, localHistoryError, nextDepth, settled } from './history';
 import { MAX_DEPTH } from '@adorable/git-local/protocol';
 import { LOCAL_ONLY } from './localRepos';
-import { locale, messagesFor } from './i18n';
+import { locale, messagesFor, ready } from './i18n';
+
+beforeAll(async () => {
+  await ready;
+  await loadLocale('zh-Hant-TW', loadBundledLocale);
+});
 
 describe('nextDepth', () => {
   it('asks for one more page than what is loaded', () => {
@@ -52,7 +58,7 @@ describe('hasMore', () => {
 
 describe('localHistoryError', () => {
   it('passes only the reason: the viewer adds "Could not load older history" itself', () => {
-    for (const l of ['zh-TW', 'en'] as const) {
+    for (const l of ['zh-Hant-TW', 'en'] as const) {
       const prefix = getMessages(l).loadMoreFailed;
       for (const r of ['unknown', LOCAL_ONLY, null] as const) {
         const reason = localHistoryError(r);

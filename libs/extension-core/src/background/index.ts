@@ -9,6 +9,7 @@ import {
   withoutRateLimit,
 } from '@adorable/graph-core';
 import type { DiagnosticAdapter, GraphData } from '@adorable/graph-core';
+import { isLocale } from '@adorable/graph-ui/i18n/locales';
 import { parseFetchMore } from '../shared/history';
 import { FETCH_MORE_MAX_STARTS, RPC_PORT } from '../shared/messages';
 import type {
@@ -528,6 +529,21 @@ function handleRequest(
         () => sendResponse({ ok: false, error: { code: 'unknown', message: 'Cache unavailable' } }),
       );
       return true;
+    case 'locale-catalog': {
+      // 只接受支援的語系代碼：不會拿訊息內容組出任意的檔案路徑
+      if (!isLocale(req.locale)) {
+        sendResponse({ ok: false, error: { code: 'unknown', message: 'Unsupported locale' } });
+        return false;
+      }
+      void fetch(chrome.runtime.getURL(`locales/${req.locale}.json`))
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then(
+          (data: unknown) => sendResponse({ ok: true, data }),
+          (err: unknown) =>
+            sendResponse({ ok: false, error: { code: 'unknown', message: toError(err).message } }),
+        );
+      return true;
+    }
     case 'open-options':
       void chrome.runtime.openOptionsPage();
       sendResponse({ ok: true, data: null });
