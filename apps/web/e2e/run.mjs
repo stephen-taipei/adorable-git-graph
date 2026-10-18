@@ -3436,6 +3436,22 @@ try {
     },
   );
 
+  // macOS 的 Chrome / Chromium 不讓方向鍵移動「關著的」select（↓ / ↑ 是打開原生選單；headless 時什麼都不做），
+  // 只有 type-ahead（打選項的開頭字母）會直接改值並觸發 change。所以 macOS 改用字母鍵走同一條鍵盤瀏覽路徑：
+  // 「g」跳到 gamma（type-ahead 一次只能跳到一個選項，「經過 beta」只在 ↓ ↓ 測得到）、「b」回到 beta。
+  const MAC_SELECT = process.platform === 'darwin';
+  const BROWSE = MAC_SELECT
+    ? [{ key: 'g', menu: ids.gamma, msg: 'the menu shows gamma, nothing else changed yet' }]
+    : [
+        { key: 'ArrowDown', menu: ids.beta, msg: 'the menu shows beta, nothing else changed yet' },
+        {
+          key: 'ArrowDown',
+          menu: ids.gamma,
+          msg: 'the menu shows gamma, still no switch (beta was only passed by)',
+        },
+      ];
+  const BACK_KEY = MAC_SELECT ? 'b' : 'ArrowUp';
+
   await step(
     'LOCAL PICKER keyboard: ↓ ↓ on the closed menu only move the menu (URL, title and history stay put); ~700 ms after the last key it switches ONCE (one history entry, only the final repo is fetched); ↑ + Enter switches right away',
     async () => {
@@ -3506,24 +3522,20 @@ try {
         assert.equal(await activeLabel(), PICK_LABEL, 'the closed menu has the keyboard focus');
 
         // ↓ ↓（很快地連按）：每一下只改選單顯示的值，網址、標題、歷史都不動
-        await page.keyboard.press('ArrowDown');
-        assert.deepEqual(
-          await now(),
-          { search: '', title: 'octo/cat', menu: ids.beta, history: historyBefore },
-          'after ↓: the menu shows beta, nothing else changed yet',
-        );
-        await page.keyboard.press('ArrowDown');
-        assert.deepEqual(
-          await now(),
-          { search: '', title: 'octo/cat', menu: ids.gamma, history: historyBefore },
-          'after ↓ ↓: the menu shows gamma, still no switch (beta was only passed by)',
-        );
+        for (const [i, { key, menu, msg }] of BROWSE.entries()) {
+          await page.keyboard.press(key);
+          assert.deepEqual(
+            await now(),
+            { search: '', title: 'octo/cat', menu, history: historyBefore },
+            `after key ${i + 1} (${key}): ${msg}`,
+          );
+        }
         let log = await probe();
-        const arrows = log.keys.filter((k) => k.key === 'ArrowDown');
-        assert.equal(arrows.length, 2, 'sanity: two ArrowDown keys reached the page');
+        const arrows = log.keys.filter((k) => BROWSE.some((b) => b.key === k.key));
+        assert.equal(arrows.length, BROWSE.length, 'sanity: every browse key reached the page');
         assert.ok(
-          arrows[1].t - arrows[0].t < 700,
-          `sanity: the two keys came ${Math.round(arrows[1].t - arrows[0].t)} ms apart (the test needs < 700 ms)`,
+          arrows.at(-1).t - arrows[0].t < 700,
+          `sanity: the keys came within ${Math.round(arrows.at(-1).t - arrows[0].t)} ms (the test needs < 700 ms)`,
         );
         assert.deepEqual(log.nav, [], 'no navigation while the keys are coming');
 
@@ -3537,7 +3549,7 @@ try {
           [`/?local=${ids.gamma}`],
           'exactly one navigation, straight to gamma',
         );
-        const waited = log.nav[0].t - arrows[1].t;
+        const waited = log.nav[0].t - arrows.at(-1).t;
         assert.ok(
           waited >= 650,
           `it switched ${Math.round(waited)} ms after the last key (it should wait ~700 ms)`,
@@ -3561,16 +3573,16 @@ try {
         // ↑ + Enter：Enter 馬上切換，不等 700 ms
         await resetProbe();
         fetched.length = 0;
-        await page.keyboard.press('ArrowUp');
+        await page.keyboard.press(BACK_KEY);
         await page.keyboard.press('Enter');
         await waitSearch(`?local=${ids.beta}`);
         log = await probe();
-        const up = log.keys.find((k) => k.key === 'ArrowUp');
+        const up = log.keys.find((k) => k.key === BACK_KEY);
         const enter = log.keys.find((k) => k.key === 'Enter');
-        assert.ok(up && enter, 'sanity: ArrowUp and Enter reached the page');
+        assert.ok(up && enter, `sanity: ${BACK_KEY} and Enter reached the page`);
         assert.ok(
           enter.t - up.t < 700,
-          `sanity: Enter came ${Math.round(enter.t - up.t)} ms after ArrowUp (the test needs < 700 ms)`,
+          `sanity: Enter came ${Math.round(enter.t - up.t)} ms after ${BACK_KEY} (the test needs < 700 ms)`,
         );
         assert.deepEqual(
           log.nav.map((n) => n.url),
@@ -3579,10 +3591,10 @@ try {
         );
         assert.ok(
           log.nav[0].t >= enter.t && log.nav[0].t - enter.t < 300,
-          `Enter switched right away (${Math.round(log.nav[0].t - enter.t)} ms after Enter, ${Math.round(log.nav[0].t - up.t)} ms after ArrowUp)`,
+          `Enter switched right away (${Math.round(log.nav[0].t - enter.t)} ms after Enter, ${Math.round(log.nav[0].t - up.t)} ms after ${BACK_KEY})`,
         );
         await titleIs('beta');
-        await waitShowsRepo(fx.beta, 'beta after ↑ + Enter');
+        await waitShowsRepo(fx.beta, `beta after ${BACK_KEY} + Enter`);
         assert.equal(
           await page.evaluate(() => history.length),
           historyBefore + 2,
