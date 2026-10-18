@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { localSource, parseRepoInput } from './source';
 import type { Source } from './source';
 import { DEFAULT_REPO } from '@adorable/git-local/protocol';
@@ -9,6 +9,7 @@ import { AUTO_SCHEME, schemeCycle } from '@adorable/graph-ui';
 import type { ColorScheme, SchemeSetting, ThemeId } from '@adorable/graph-ui';
 import { t } from './i18n';
 import { HAS_SERVER } from './runtime';
+import { isKeyNav } from './selectKeys';
 
 const TONE_ICON: Record<ColorScheme['tone'], string> = { day: '☀️', night: '🌙' };
 
@@ -136,11 +137,8 @@ export function SourceBar({
 }
 
 const CURRENT = '__current';
-/** 鍵盤在「關著的」select 上移動時，Chrome / Firefox 每按一下就觸發一次 change：停下來這麼久才真的切換 */
+/** 鍵盤在「關著的」select 上移動時（見 isKeyNav），每按一下就觸發一次 change：停下來這麼久才真的切換 */
 const KEY_SETTLE_MS = 700;
-const isKeyNav = (e: KeyboardEvent<HTMLSelectElement>) =>
-  /^(Arrow(Up|Down|Left|Right)|Home|End|Page(Up|Down))$/.test(e.key) ||
-  (e.key.length === 1 && e.key !== ' ' && !e.altKey && !e.ctrlKey && !e.metaKey);
 
 /** 本機 repo 選單：dev server 掃描到的 repo + 手動輸入路徑。瀏覽器只送出 repo id（和使用者自己輸入的路徑）。 */
 function LocalPicker({ current, onPick }: { current: string; onPick: (id: string) => void }) {
