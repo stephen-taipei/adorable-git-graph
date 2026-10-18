@@ -1,6 +1,6 @@
 {
   "name": "@stephen.taipei/adorable-git-graph",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Cartoon-style animated git graph for your local repositories. Run `npx @stephen.taipei/adorable-git-graph` inside any git repo.",
   "license": "Apache-2.0",
   "type": "module",
